@@ -1,12 +1,17 @@
+import { useNavigate } from 'react-router-dom';
+
 function Navigation({ isMobile, setIsMobile }) {    
+    const navigate = useNavigate();
 return (
         <div>
             
             <div className="relative border-b border-b-neutral-800 border-solid md:flex justify-between items-center py-4 px-8 lg:px-20 w-full">                
                 <div className="flex flex-row justify-between lg:ml-8">
                     <div className="flex flex-row gap-x-4 items-center text-white md:ml-20">
-                        <img src="/public/logo-white.png" height={40} width={40}></img>
-                        <button>LangPulse</button>
+                        <button onClick={() => navigate('/')}>
+                            <img src="/public/logo-white.png" height={40} width={40}></img>
+                        </button>
+                        <button onClick={() => navigate('/')}>LangPulse</button>
                     </div>
 
                     <button className="md:hidden" onClick={() => setIsMobile(!isMobile)}>
@@ -19,7 +24,7 @@ return (
                 </div>
 
                 <div className="hidden md:flex flex-row text-white gap-x-10 mr-20">
-                    <button>Log in</button>
+                    <button onClick={() => navigate('/login') }>Log in</button>
                     <button className="md:bg-white text-black p-2 rounded-full">Get Started</button>
                 </div>
             </div>
