@@ -1,6 +1,6 @@
 function Chat () {
     return (
-        <div className="flex-grow m-4 p-6 bg-zinc-900 rounded-2xl border border-neutral-700 shadow-inner text-white">
+        <div className="flex-grow m-4 ml-0 p-6 bg-zinc-900 rounded-2xl border border-neutral-700 shadow-inner text-white">
             <div className="flex flex-row justify-end items-center gap-x-2">
                 <button><img src='public/LLMinvite.png'></img></button>
                 <button><img src='public/userInvite.png'></img></button>
