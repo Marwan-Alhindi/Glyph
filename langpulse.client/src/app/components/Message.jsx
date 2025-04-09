@@ -8,22 +8,23 @@ function Message ({text}) {
         return Boolean
     }
     return (
-        <div className="bg-neutral-800 border border-yellow-300 border-solid mt-4 rounded-lg max-h-160 max-w-90 flex flex-col justify-between">
-
+        <div>
             {more ? (
-                <div>
+                <div className="bg-neutral-800 border border-yellow-300 border-solid mt-4 rounded-lg max-h-160 max-w-90 flex flex-col justify-between">
                     <p className="m-4 line-clamp-25">{text}</p>
-                    <div className="flex justify-end mt-4">
+                    <div className="flex justify-end">
                         <button
-                        className="border border-yellow-300 border-solid p-2"
+                        className="m-4"
                         onClick={() => setIsMore(!more)}
-                        ></button>
+                        >More...</button>
                     </div>
                 </div>
 
             ) : (
-                <div>
-                    <p>{text}</p>
+                <div className="bg-neutral-800 border border-yellow-300 border-solid mt-4 rounded-lg max-w-90 flex flex-col">
+                    <div className="m-4">
+                        <p>{text}</p>
+                    </div>
                 </div>
             )}
         </div>
