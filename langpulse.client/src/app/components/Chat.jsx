@@ -47,8 +47,11 @@ function Chat () {
                                 <div className="flex left-0 justify-end mr-6">
                                     <Message text={message} />
                                 </div>
-                                <div>
-                                    <AIMessage text={AImessage} />
+                                <div className="mt-4">
+                                    <img src="/chatgpt.png" width={70} height={70}></img>
+                                    <div>
+                                        <AIMessage text={AImessage} />
+                                    </div>
                                 </div>
                                 </React.Fragment>
                             );
