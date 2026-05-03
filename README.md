@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="o-frontend/public/logo-white.png" alt="O" width="96" />
+  <img src="o-frontend/public/logo-white.svg" alt="O" width="96" />
 
   # O
 
