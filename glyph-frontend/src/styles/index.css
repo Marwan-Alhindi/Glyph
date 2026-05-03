@@ -1,0 +1,101 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", "InterVariable", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-display: "Inter", "InterVariable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+
+  /* Surfaces — calibrated dark scale */
+  --color-canvas: #0a0a0b;
+  --color-surface-1: #111114;
+  --color-surface-2: #16161a;
+  --color-surface-3: #1d1d22;
+  --color-line: #26262c;
+  --color-line-soft: #1c1c22;
+
+  /* Text */
+  --color-fg: #ededf0;
+  --color-fg-muted: #9b9ba3;
+  --color-fg-subtle: #6b6b73;
+
+  /* Brand */
+  --color-brand: #ffd84d;
+  --color-brand-hover: #ffe071;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    background: var(--color-canvas);
+    color: var(--color-fg);
+  }
+  /* Refined scrollbars — only on dark surfaces */
+  .lp-scroll::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  .lp-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .lp-scroll::-webkit-scrollbar-thumb {
+    background: #2a2a30;
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  .lp-scroll::-webkit-scrollbar-thumb:hover {
+    background: #3a3a42;
+    background-clip: padding-box;
+  }
+}
+
+@layer utilities {
+  /* Subtle radial spotlight used on hero/empty states */
+  .lp-spotlight {
+    background-image: radial-gradient(
+      900px 480px at 50% -10%,
+      rgba(255, 216, 77, 0.08),
+      transparent 60%
+    );
+  }
+  .lp-spotlight-violet {
+    background-image: radial-gradient(
+      900px 480px at 80% -10%,
+      rgba(139, 92, 246, 0.10),
+      transparent 60%
+    ),
+    radial-gradient(
+      700px 400px at 10% 110%,
+      rgba(56, 189, 248, 0.08),
+      transparent 60%
+    );
+  }
+  /* Hairline border helper */
+  .lp-hairline {
+    box-shadow: inset 0 0 0 1px var(--color-line);
+  }
+  .lp-hairline-soft {
+    box-shadow: inset 0 0 0 1px var(--color-line-soft);
+  }
+  /* Fade-in for chat surfaces */
+  @keyframes lp-fade-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .lp-fade-in {
+    animation: lp-fade-in 220ms ease-out both;
+  }
+  /* Shimmer for "thinking" state */
+  @keyframes lp-pulse-dot {
+    0%, 80%, 100% { opacity: 0.25; transform: scale(0.85); }
+    40% { opacity: 1; transform: scale(1); }
+  }
+  .lp-dot {
+    animation: lp-pulse-dot 1.4s ease-in-out infinite;
+  }
+}
