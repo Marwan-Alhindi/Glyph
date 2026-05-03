@@ -1,29 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" fill="none">
-  <defs>
-    <filter id="ink" x="-25%" y="-25%" width="150%" height="150%">
-      <feTurbulence type="fractalNoise" baseFrequency="0.018" numOctaves="3" seed="4" result="noise"/>
-      <feDisplacementMap in="SourceGraphic" in2="noise" scale="18"/>
-    </filter>
-  </defs>
-
-  <g filter="url(#ink)">
-    <path d="M 402 337 A 175 175 0 1 1 402 163"
-          stroke="white" stroke-width="14" fill="none" stroke-linecap="round"/>
-  </g>
-
-  <g fill="white">
-    <circle cx="408" cy="155" r="3" opacity="0.85"/>
-    <circle cx="420" cy="142" r="2" opacity="0.7"/>
-    <circle cx="432" cy="135" r="1.5" opacity="0.5"/>
-    <circle cx="408" cy="343" r="2.5" opacity="0.8"/>
-    <circle cx="418" cy="355" r="1.5" opacity="0.6"/>
-  </g>
-
-  <g fill="white" opacity="0.4">
-    <circle cx="105" cy="175" r="1.5"/>
-    <circle cx="80" cy="290" r="1"/>
-    <circle cx="190" cy="445" r="1.5"/>
-    <circle cx="350" cy="450" r="1.2"/>
-    <circle cx="130" cy="100" r="1"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 524 654" fill="none">
+  <g stroke="white" stroke-width="8" stroke-linejoin="round">
+    <ellipse cx="200" cy="220" rx="195" ry="210" transform="rotate(-8 200 220)"/>
+    <ellipse cx="270" cy="320" rx="170" ry="185" transform="rotate(-8 270 320)"/>
+    <ellipse cx="340" cy="420" rx="145" ry="160" transform="rotate(-8 340 420)"/>
   </g>
 </svg>
