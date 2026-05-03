@@ -29,7 +29,7 @@ function Login() {
             <div className="w-full max-w-md">
                 {/* Brand */}
                 <div className="mb-8 flex flex-col items-center text-center">
-                    <img src="/logo-white.svg" width={36} height={36} alt="" />
+                    <img src="/logo-white.png" width={36} height={36} alt="" />
                     <h1 className="mt-4 text-2xl font-semibold tracking-tight">Welcome back</h1>
                     <p className="mt-1 text-sm text-[var(--color-fg-muted)]">
                         Log in to continue your conversations.
