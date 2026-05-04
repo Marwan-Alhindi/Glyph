@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom'
+import LiveDemo from './LiveDemo'
 
 function Hero() {
   const navigate = useNavigate()
@@ -140,6 +141,9 @@ function Hero() {
           desc="Type @model to send the prompt. Replies show up in the workspace pane — code blocks, markdown, the works."
         />
       </section>
+
+      {/* Live demo (animated) */}
+      <LiveDemo />
 
       {/* CTA strip */}
       <div className="mt-24">
