@@ -44,9 +44,10 @@ function InviteUser({ chatId, onClose }) {
             if (userIds.length > 0) {
                 const profResult = await supabase
                     .from("profiles")
-                    .select("id, first_name, last_name")
+                    .select("id, first_name")
                     .in("id", userIds)
                 if (cancelled) return
+                if (profResult.error) console.error("InviteUser: failed to load profiles", profResult.error)
                 const map = {}
                 for (const p of profResult.data || []) map[p.id] = p
                 setProfilesById(map)
@@ -206,9 +207,7 @@ function InviteUser({ chatId, onClose }) {
                             <ul className="divide-y divide-[var(--color-line-soft)] rounded-lg border border-[var(--color-line-soft)] bg-[var(--color-surface-2)]/40">
                                 {participants.map(p => {
                                     const profile = profilesById[p.user_id]
-                                    const name = profile
-                                        ? [profile.first_name, profile.last_name].filter(Boolean).join(" ") || "User"
-                                        : "User"
+                                    const name = profile?.first_name || "User"
                                     const isMe = p.user_id === user?.id
                                     return (
                                         <li key={p.id} className="flex items-center gap-3 px-3 py-2">
