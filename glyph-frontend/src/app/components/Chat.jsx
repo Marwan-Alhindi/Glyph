@@ -7,13 +7,14 @@ import UserContext from "./UserContext"
 import InviteUser from "./InviteUser"
 import Calendar, { toDateKey } from "./Calendar"
 import DailyNote from "./DailyNote"
+import Agent from "./Agent"
 import { supabase, API_BASE } from "../../services/supabase"
 import { useAuth } from "../../contexts/AuthContext"
 import { getLLMColor, getLLMInitials, modelTypeLabel } from "../utils/llmColors"
 
 const GROUP_KEYS = {
     chat: ['team', 'models', 'files'],
-    planner: ['calendar', 'daily'],
+    planner: ['calendar', 'daily', 'agent'],
 }
 const PANEL_LABELS = {
     team: 'Team chat',
@@ -21,6 +22,7 @@ const PANEL_LABELS = {
     files: 'Files',
     calendar: 'Calendar',
     daily: 'Daily note',
+    agent: 'Agent',
 }
 
 function Chat({ chatId }) {
@@ -46,17 +48,18 @@ function Chat({ chatId }) {
                     team: saved.team ?? 47,
                     models: saved.models ?? 53,
                     files: saved.files ?? 0,
-                    calendar: saved.calendar ?? 35,
-                    daily: saved.daily ?? 65,
+                    calendar: saved.calendar ?? 24,
+                    daily: saved.daily ?? 42,
+                    agent: saved.agent ?? 34,
                 }
             }
             // Migrate from the older two-pane key
             const oldTeamPct = parseFloat(localStorage.getItem("glyph.teamWidthPct"))
             if (Number.isFinite(oldTeamPct) && oldTeamPct >= 20 && oldTeamPct <= 80) {
-                return { team: oldTeamPct, models: 100 - oldTeamPct, files: 0, calendar: 35, daily: 65 }
+                return { team: oldTeamPct, models: 100 - oldTeamPct, files: 0, calendar: 24, daily: 42, agent: 34 }
             }
         } catch {}
-        return { team: 47, models: 53, files: 0, calendar: 35, daily: 65 }
+        return { team: 47, models: 53, files: 0, calendar: 24, daily: 42, agent: 34 }
     })
     const [isResizing, setIsResizing] = useState(false)
     const [activeResize, setActiveResize] = useState(null)
@@ -70,10 +73,11 @@ function Chat({ chatId }) {
                     files: !!saved.files,
                     calendar: saved.calendar !== false,
                     daily: saved.daily !== false,
+                    agent: saved.agent !== false,
                 }
             }
         } catch {}
-        return { team: true, models: true, files: false, calendar: true, daily: true }
+        return { team: true, models: true, files: false, calendar: true, daily: true, agent: true }
     })
     const [viewGroup, setViewGroup] = useState(() => {
         const saved = localStorage.getItem("glyph.viewGroup")
@@ -494,25 +498,89 @@ function Chat({ chatId }) {
         localStorage.setItem("glyph.viewGroup", viewGroup)
     }, [viewGroup])
 
-    // Load planner notes for the current user
+    // Load planner notes for the current chat (per-chat, shared across members)
     useEffect(() => {
-        if (!user?.id) return
-        try {
-            const raw = localStorage.getItem(`glyph.planner.${user.id}.notes`)
-            setNotes(raw ? JSON.parse(raw) : {})
-        } catch { setNotes({}) }
-    }, [user?.id])
+        if (!chatId) {
+            setNotes({})
+            return
+        }
+        let cancelled = false
+        ;(async () => {
+            const { data, error } = await supabase
+                .from("daily_notes")
+                .select("date, content")
+                .eq("chat_id", chatId)
+            if (cancelled) return
+            if (error) {
+                console.error("Failed to load daily notes:", error)
+                setNotes({})
+                return
+            }
+            const map = {}
+            for (const row of data || []) {
+                map[row.date] = row.content || ""
+            }
+            setNotes(map)
+        })()
+        return () => { cancelled = true }
+    }, [chatId])
 
-    function updateNote(dateKey, content) {
+    // Realtime: stream daily_notes changes so co-members see edits live
+    useEffect(() => {
+        if (!chatId) return
+        const channelName = `daily-notes-${chatId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+        const channel = supabase
+            .channel(channelName)
+            .on('postgres_changes',
+                { event: '*', schema: 'public', table: 'daily_notes', filter: `chat_id=eq.${chatId}` },
+                (payload) => {
+                    if (payload.eventType === 'DELETE') {
+                        const oldDate = payload.old?.date
+                        if (!oldDate) return
+                        setNotes(prev => {
+                            if (!(oldDate in prev)) return prev
+                            const next = { ...prev }
+                            delete next[oldDate]
+                            return next
+                        })
+                    } else if (payload.new) {
+                        const { date, content } = payload.new
+                        setNotes(prev => prev[date] === (content || "") ? prev : { ...prev, [date]: content || "" })
+                    }
+                }
+            )
+            .subscribe()
+        return () => { supabase.removeChannel(channel) }
+    }, [chatId])
+
+    async function updateNote(dateKey, content) {
+        if (!chatId) return
+        const isEmpty = !content || content.trim() === ""
+
+        // Optimistic local update
         setNotes(prev => {
             const next = { ...prev }
-            if (!content || content.trim() === "") delete next[dateKey]
+            if (isEmpty) delete next[dateKey]
             else next[dateKey] = content
-            if (user?.id) {
-                try { localStorage.setItem(`glyph.planner.${user.id}.notes`, JSON.stringify(next)) } catch {}
-            }
             return next
         })
+
+        if (isEmpty) {
+            const { error } = await supabase
+                .from("daily_notes")
+                .delete()
+                .eq("chat_id", chatId)
+                .eq("date", dateKey)
+            if (error) console.error("Failed to delete note:", error)
+        } else {
+            const { error } = await supabase
+                .from("daily_notes")
+                .upsert(
+                    { chat_id: chatId, date: dateKey, content, updated_by: user?.id ?? null },
+                    { onConflict: "chat_id,date" }
+                )
+            if (error) console.error("Failed to save note:", error)
+        }
     }
 
     function togglePanel(name) {
@@ -749,6 +817,7 @@ function Chat({ chatId }) {
                         <>
                             <PanelToggleBtn active={openPanels.calendar} onClick={() => togglePanel('calendar')} label="Calendar"><CalendarIcon /></PanelToggleBtn>
                             <PanelToggleBtn active={openPanels.daily} onClick={() => togglePanel('daily')} label="Daily note"><NoteIcon /></PanelToggleBtn>
+                            <PanelToggleBtn active={openPanels.agent} onClick={() => togglePanel('agent')} label="Agent"><AgentIcon /></PanelToggleBtn>
                         </>
                     )}
                 </div>
@@ -934,6 +1003,9 @@ function Chat({ chatId }) {
         />
     )
 
+    const agentPane = <Agent chatId={chatId} notes={notes} />
+
+
     /* ---------- Files pane ---------- */
     const filesPane = (
         <section className="flex min-h-0 flex-1 flex-col border-[var(--color-line-soft)] bg-[var(--color-surface-1)] md:border-l">
@@ -1040,6 +1112,7 @@ function Chat({ chatId }) {
                     files: filesPane,
                     calendar: calendarPane,
                     daily: dailyPane,
+                    agent: agentPane,
                 }
                 const panels = GROUP_KEYS[viewGroup]
                     .filter(k => openPanels[k])
@@ -1224,6 +1297,20 @@ function NoteIcon() {
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
             <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+        </svg>
+    )
+}
+function AgentIcon() {
+    return (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2v4" />
+            <path d="M12 18v4" />
+            <path d="M2 12h4" />
+            <path d="M18 12h4" />
+            <path d="M5 5l2.8 2.8" />
+            <path d="M16.2 16.2L19 19" />
+            <path d="M5 19l2.8-2.8" />
+            <path d="M16.2 7.8L19 5" />
         </svg>
     )
 }

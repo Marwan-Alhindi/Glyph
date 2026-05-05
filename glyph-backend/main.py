@@ -229,6 +229,39 @@ class AskLLMRequest(BaseModel):
     llm_id: str
 
 
+class PlanAgentRequest(BaseModel):
+    chat_id: str
+
+
+PLANNER_SYSTEM_PROMPT = """You are a planning agent. The user keeps day-by-day task notes in markdown. You produce an ordered execution plan that respects dependencies and surfaces what is doable first.
+
+You will receive a list of dates with markdown content. Each markdown body may contain task lines (`- [ ]` for open tasks, `- [x]` for completed) plus free-form notes.
+
+Your job:
+1. Extract every OPEN task across all days. Skip already-checked tasks.
+2. Infer dependencies between tasks from the language used. Examples of dependency cues: explicit phrases ("needs X", "after Y", "depends on Z"), implicit ordering (designing UI before coding it, drafting copy before designing a hero around it), and references in adjacent notes.
+3. Produce a single ordered plan that:
+   - Respects every inferred dependency (a task only appears after its prerequisites)
+   - Picks tasks that are immediately ready first, even if that means doing a future day's task before today's last task
+   - Prioritizes tasks that unblock the most downstream work
+
+Return JSON ONLY, with this exact shape:
+{
+  "summary": "<one sentence describing the overall plan>",
+  "plan": [
+    {
+      "date": "YYYY-MM-DD",
+      "task": "<exact task text from the markdown, without the leading `- [ ]`>",
+      "depends_on": ["<exact texts of prerequisite tasks, if any>"],
+      "rationale": "<one short sentence on why this task is at this position>"
+    }
+  ]
+}
+
+If there are no open tasks, return {"summary": "No open tasks found.", "plan": []}.
+"""
+
+
 @app.get("/")
 def read_root():
     return {"message": "Welcome to Langpulse backend"}
@@ -269,6 +302,68 @@ def ask_llm(body: AskLLMRequest, authorization: str = Header()):
             "Connection": "keep-alive",
         },
     )
+
+
+@app.post("/planAgent")
+def plan_agent(body: PlanAgentRequest, authorization: str = Header()):
+    user_id = get_current_user(authorization)
+    verify_participant(user_id, body.chat_id)
+
+    notes_result = (
+        supabase.table("daily_notes")
+        .select("date, content")
+        .eq("chat_id", body.chat_id)
+        .order("date")
+        .execute()
+    )
+    notes_rows = notes_result.data or []
+    if not notes_rows:
+        return {"summary": "No notes for this chat yet.", "plan": []}
+
+    if not any("- [ ]" in (r.get("content") or "") for r in notes_rows):
+        return {"summary": "No open tasks found.", "plan": []}
+
+    user_message = "\n\n".join(
+        f"## {r['date']}\n{(r.get('content') or '').strip() or '(empty)'}"
+        for r in notes_rows
+    )
+
+    try:
+        response = openai_client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": PLANNER_SYSTEM_PROMPT},
+                {"role": "user", "content": user_message},
+            ],
+            response_format={"type": "json_object"},
+        )
+        raw = response.choices[0].message.content or "{}"
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=502, detail=f"Planner returned invalid JSON: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Planner failed: {e}")
+
+    summary = parsed.get("summary", "")
+    plan = parsed.get("plan", [])
+
+    if not isinstance(plan, list):
+        plan = []
+    cleaned_plan = []
+    for entry in plan:
+        if not isinstance(entry, dict):
+            continue
+        task_text = entry.get("task")
+        if not task_text:
+            continue
+        cleaned_plan.append({
+            "date": entry.get("date", ""),
+            "task": task_text,
+            "depends_on": entry.get("depends_on") if isinstance(entry.get("depends_on"), list) else [],
+            "rationale": entry.get("rationale", ""),
+        })
+
+    return {"summary": summary, "plan": cleaned_plan}
 
 
 # Mount invitation routes (defined in invitations.py, imported here so it sees
