@@ -200,6 +200,35 @@ function Chat({ chatId }) {
                     }
                 }
             )
+            .on('postgres_changes',
+                { event: 'INSERT', schema: 'public', table: 'chat_participants', filter: `chat_id=eq.${chatId}` },
+                async (payload) => {
+                    const userId = payload.new?.user_id
+                    if (!userId) return
+                    const role = payload.new?.role
+                    const { data: profile } = await supabase
+                        .from("profiles")
+                        .select("id, first_name")
+                        .eq("id", userId)
+                        .single()
+                    if (profile) {
+                        setProfilesById(prev => ({ ...prev, [profile.id]: { ...profile, role } }))
+                    }
+                }
+            )
+            .on('postgres_changes',
+                { event: 'DELETE', schema: 'public', table: 'chat_participants', filter: `chat_id=eq.${chatId}` },
+                (payload) => {
+                    const userId = payload.old?.user_id
+                    if (!userId) return
+                    setProfilesById(prev => {
+                        if (!prev[userId]) return prev
+                        const next = { ...prev }
+                        delete next[userId]
+                        return next
+                    })
+                }
+            )
             .subscribe()
 
         return () => { supabase.removeChannel(channel) }
