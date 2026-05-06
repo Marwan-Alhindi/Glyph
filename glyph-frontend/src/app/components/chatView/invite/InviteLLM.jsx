@@ -1,6 +1,6 @@
 import { useState } from "react"
-import { getLLMColor, getLLMInitials, modelTypeLabel } from "../utils/llmColors"
-import { FOUNDATION_MODELS, SPECIALIST_AGENTS } from "../utils/modelCatalog"
+import { getLLMColor, getLLMInitials, modelTypeLabel } from "../../../utils/llmColors"
+import { FOUNDATION_MODELS, SPECIALIST_AGENTS } from "../../../utils/modelCatalog"
 
 function InviteLLM({ onClose, onInvite, invitedLLMs }) {
     const [mode, setMode] = useState("specialists")

@@ -1,13 +1,21 @@
-import { useState, useEffect, useRef, useMemo, Fragment } from "react"
-import Message from "./Message"
-import AIMessage from "./AIMessage"
-import InviteLLM from "./InviteLLM"
-import LLMContext from "./LLMContext"
-import UserContext from "./UserContext"
-import InviteUser from "./InviteUser"
-import Calendar, { toDateKey } from "./Calendar"
-import DailyNote from "./DailyNote"
-import Agent from "./Agent"
+import { useState, useEffect, useRef, useMemo, useCallback, Fragment } from "react"
+import { useChatMessages } from "../hooks/useChatMessages"
+import { usePlannerNotes } from "../hooks/usePlannerNotes"
+import Message from "./chatView/message/Message"
+import AIMessage from "./chatView/message/AIMessage"
+import InviteLLM from "./chatView/invite/InviteLLM"
+import InviteUser from "./chatView/invite/InviteUser"
+import LLMContext from "./chatView/context/LLMContext"
+import UserContext from "./chatView/context/UserContext"
+import Calendar from "./plannerView/Calendar"
+import DailyNote from "./plannerView/DailyNote"
+import Agent from "./plannerView/Agent"
+import {
+    SendIcon, TargetIcon, FeatureIcon, SideAskIcon, MoreIcon, AttachIcon,
+    WebIcon, VoiceIcon, ExportIcon, RefreshIcon, BotIcon, UserPlusIcon,
+    PeopleIcon, FilterIcon, TrashIcon, FileIcon, CalendarIcon, NoteIcon,
+    AgentIcon, ChatBubbleIcon, ChatIcon,
+} from "./Icons"
 import { supabase, API_BASE } from "../../services/supabase"
 import { useAuth } from "../../contexts/AuthContext"
 import { getLLMColor, getLLMInitials, getPersonColor, modelTypeLabel } from "../utils/llmColors"
@@ -48,9 +56,22 @@ function getMentionableBadge(target) {
 }
 
 function Chat({ chatId }) {
-    const [chatName, setChatName] = useState("Chat")
-    const [messages, setMessages] = useState([])
-    const [invitedLLMs, setInvitedLLMs] = useState([])
+    const [pendingLLMs, setPendingLLMs] = useState({}) // { llmId: true }
+    const handleLLMReply = useCallback((fullMsg) => {
+        setPendingLLMs(prev => {
+            const next = { ...prev }
+            delete next[fullMsg.sender_llm_id]
+            return next
+        })
+    }, [])
+    const {
+        chatName,
+        messages, setMessages,
+        invitedLLMs, setInvitedLLMs,
+        profilesById,
+        loading,
+    } = useChatMessages(chatId, { onLLMReply: handleLLMReply })
+
     const [inputText, setInputText] = useState("")
     const [InviteLLMpop, setInviteLLMpop] = useState(false)
     const [deleteMessageTarget, setDeleteMessageTarget] = useState(null)
@@ -66,9 +87,6 @@ function Chat({ chatId }) {
     const [contextLLM, setContextLLM] = useState(null)
     const [contextUser, setContextUser] = useState(null)
     const [showInviteUser, setShowInviteUser] = useState(false)
-    const [profilesById, setProfilesById] = useState({})
-    const [loading, setLoading] = useState(true)
-    const [pendingLLMs, setPendingLLMs] = useState({}) // { llmId: true }
     const [mobileTab, setMobileTab] = useState("team") // "team" | "models"
     const [teamFilterUserId, setTeamFilterUserId] = useState(null)
     const [workspaceFilterLLMId, setWorkspaceFilterLLMId] = useState(null)
@@ -121,175 +139,14 @@ function Chat({ chatId }) {
         const saved = localStorage.getItem("glyph.viewGroup")
         return saved === "planner" ? "planner" : "chat"
     })
-    const [selectedDate, setSelectedDate] = useState(() => toDateKey(new Date()))
-    const [notes, setNotes] = useState({})
-
     const { user, session } = useAuth()
+    const { selectedDate, setSelectedDate, notes, updateNote } = usePlannerNotes(chatId, user?.id)
+
     const teamScrollRef = useRef(null)
     const modelsScrollRef = useRef(null)
     const inputRef = useRef(null)
     const splitRef = useRef(null)
     const composerRef = useRef(null)
-
-    // Load chat metadata + messages + LLMs + profiles
-    useEffect(() => {
-        if (!chatId) return
-        setLoading(true)
-
-        async function loadData() {
-            const { data: chatRow } = await supabase
-                .from("chats")
-                .select("name")
-                .eq("id", chatId)
-                .single()
-            if (chatRow) setChatName(chatRow.name || "Chat")
-
-            const { data: msgs } = await supabase
-                .from("messages")
-                .select("*, invited_llms(id, display_name, display_number, model_type)")
-                .eq("chat_id", chatId)
-                .order("created_at", { ascending: true })
-            if (msgs) setMessages(msgs)
-
-            const { data: llms } = await supabase
-                .from("invited_llms")
-                .select("*, llm_connections!llm_id(*)")
-                .eq("chat_id", chatId)
-                .order("created_at", { ascending: true })
-            if (llms) setInvitedLLMs(llms)
-
-            const { data: participants } = await supabase
-                .from("chat_participants")
-                .select("user_id, role")
-                .eq("chat_id", chatId)
-            if (participants?.length) {
-                const { data: profiles } = await supabase
-                    .from("profiles")
-                    .select("id, first_name")
-                    .in("id", participants.map(p => p.user_id))
-                if (profiles) {
-                    const roleByUserId = Object.fromEntries(participants.map(p => [p.user_id, p.role]))
-                    setProfilesById(Object.fromEntries(profiles.map(p => [p.id, { ...p, role: roleByUserId[p.id] }])))
-                }
-            }
-
-            setLoading(false)
-        }
-        loadData()
-    }, [chatId])
-
-    // Realtime subscription
-    useEffect(() => {
-        if (!chatId) return
-
-        // Unique channel name per mount — avoids strict-mode double-mount
-        // hitting "cannot add postgres_changes after subscribe()".
-        const channelName = `chat-${chatId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-        const channel = supabase
-            .channel(channelName)
-            .on('postgres_changes',
-                { event: 'INSERT', schema: 'public', table: 'messages', filter: `chat_id=eq.${chatId}` },
-                async (payload) => {
-                    const { data: fullMsg } = await supabase
-                        .from("messages")
-                        .select("*, invited_llms(id, display_name, display_number, model_type)")
-                        .eq("id", payload.new.id)
-                        .single()
-
-                    if (fullMsg) {
-                        setMessages(prev => prev.some(m => m.id === fullMsg.id) ? prev : [...prev, fullMsg])
-
-                        // Clear pending state for this LLM
-                        if (fullMsg.sender_type === 'llm' && fullMsg.sender_llm_id) {
-                            setPendingLLMs(prev => {
-                                const next = { ...prev }
-                                delete next[fullMsg.sender_llm_id]
-                                return next
-                            })
-                        }
-
-                        // Lazy load profile
-                        if (fullMsg.sender_type === 'user' && fullMsg.sender_user_id) {
-                            setProfilesById(prev => {
-                                if (prev[fullMsg.sender_user_id]) return prev
-                                supabase
-                                    .from("profiles")
-                                    .select("id, first_name")
-                                    .eq("id", fullMsg.sender_user_id)
-                                    .single()
-                                    .then(({ data }) => {
-                                        if (data) setProfilesById(p => ({ ...p, [data.id]: data }))
-                                    })
-                                return prev
-                            })
-                        }
-                    }
-                }
-            )
-            .on('postgres_changes',
-                { event: 'UPDATE', schema: 'public', table: 'messages', filter: `chat_id=eq.${chatId}` },
-                (payload) => {
-                    const updated = payload.new
-                    if (!updated?.id) return
-                    setMessages(prev => prev.map(m => m.id === updated.id
-                        ? {
-                            ...m,
-                            content: updated.content,
-                            deleted_at: updated.deleted_at,
-                            edited_at: updated.edited_at,
-                            included_in_context: updated.included_in_context,
-                            side_parent_message_id: updated.side_parent_message_id,
-                        }
-                        : m
-                    ))
-                }
-            )
-            .on('postgres_changes',
-                { event: 'INSERT', schema: 'public', table: 'invited_llms', filter: `chat_id=eq.${chatId}` },
-                async (payload) => {
-                    const { data: fullLlm } = await supabase
-                        .from("invited_llms")
-                        .select("*, llm_connections!llm_id(*)")
-                        .eq("id", payload.new.id)
-                        .single()
-                    if (fullLlm) {
-                        setInvitedLLMs(prev => prev.some(l => l.id === fullLlm.id) ? prev : [...prev, fullLlm])
-                    }
-                }
-            )
-            .on('postgres_changes',
-                { event: 'INSERT', schema: 'public', table: 'chat_participants', filter: `chat_id=eq.${chatId}` },
-                async (payload) => {
-                    const userId = payload.new?.user_id
-                    if (!userId) return
-                    const role = payload.new?.role
-                    const { data: profile } = await supabase
-                        .from("profiles")
-                        .select("id, first_name")
-                        .eq("id", userId)
-                        .single()
-                    if (profile) {
-                        setProfilesById(prev => ({ ...prev, [profile.id]: { ...profile, role } }))
-                    }
-                }
-            )
-            .on('postgres_changes',
-                { event: 'DELETE', schema: 'public', table: 'chat_participants', filter: `chat_id=eq.${chatId}` },
-                (payload) => {
-                    const userId = payload.old?.user_id
-                    if (!userId) return
-                    setProfilesById(prev => {
-                        if (!prev[userId]) return prev
-                        const next = { ...prev }
-                        delete next[userId]
-                        return next
-                    })
-                }
-            )
-            .subscribe()
-
-        return () => { supabase.removeChannel(channel) }
-    }, [chatId])
 
     // Auto-scroll each pane independently
     useEffect(() => {
@@ -802,91 +659,6 @@ function Chat({ chatId }) {
     useEffect(() => {
         localStorage.setItem("glyph.viewGroup", viewGroup)
     }, [viewGroup])
-
-    // Load planner notes for the current chat (per-chat, shared across members)
-    useEffect(() => {
-        if (!chatId) {
-            setNotes({})
-            return
-        }
-        let cancelled = false
-        ;(async () => {
-            const { data, error } = await supabase
-                .from("daily_notes")
-                .select("date, content")
-                .eq("chat_id", chatId)
-            if (cancelled) return
-            if (error) {
-                console.error("Failed to load daily notes:", error)
-                setNotes({})
-                return
-            }
-            const map = {}
-            for (const row of data || []) {
-                map[row.date] = row.content || ""
-            }
-            setNotes(map)
-        })()
-        return () => { cancelled = true }
-    }, [chatId])
-
-    // Realtime: stream daily_notes changes so co-members see edits live
-    useEffect(() => {
-        if (!chatId) return
-        const channelName = `daily-notes-${chatId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-        const channel = supabase
-            .channel(channelName)
-            .on('postgres_changes',
-                { event: '*', schema: 'public', table: 'daily_notes', filter: `chat_id=eq.${chatId}` },
-                (payload) => {
-                    if (payload.eventType === 'DELETE') {
-                        const oldDate = payload.old?.date
-                        if (!oldDate) return
-                        setNotes(prev => {
-                            if (!(oldDate in prev)) return prev
-                            const next = { ...prev }
-                            delete next[oldDate]
-                            return next
-                        })
-                    } else if (payload.new) {
-                        const { date, content } = payload.new
-                        setNotes(prev => prev[date] === (content || "") ? prev : { ...prev, [date]: content || "" })
-                    }
-                }
-            )
-            .subscribe()
-        return () => { supabase.removeChannel(channel) }
-    }, [chatId])
-
-    async function updateNote(dateKey, content) {
-        if (!chatId) return
-        const isEmpty = !content || content.trim() === ""
-
-        // Optimistic local update
-        setNotes(prev => {
-            const next = { ...prev }
-            if (isEmpty) delete next[dateKey]
-            else next[dateKey] = content
-            return next
-        })
-
-        if (isEmpty) {
-            const { error } = await supabase
-                .from("daily_notes")
-                .delete()
-                .eq("chat_id", chatId)
-                .eq("date", dateKey)
-            if (error) console.error("Failed to delete note:", error)
-        } else {
-            const { error } = await supabase
-                .from("daily_notes")
-                .upsert(
-                    { chat_id: chatId, date: dateKey, content, updated_by: user?.id ?? null },
-                    { onConflict: "chat_id,date" }
-                )
-            if (error) console.error("Failed to save note:", error)
-        }
-    }
 
     function togglePanel(name) {
         setOpenPanels(prev => {
@@ -2137,158 +1909,7 @@ function EmptyModels({ onInvite, hasModels }) {
     )
 }
 
-/* ---------------- Icons ---------------- */
-function SendIcon() {
-    return (
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="22" y1="2" x2="11" y2="13" />
-            <polygon points="22 2 15 22 11 13 2 9 22 2" />
-        </svg>
-    )
-}
-function TargetIcon() {
-    return (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="8" />
-            <circle cx="12" cy="12" r="3" />
-            <line x1="12" y1="2" x2="12" y2="5" />
-            <line x1="12" y1="19" x2="12" y2="22" />
-            <line x1="2" y1="12" x2="5" y2="12" />
-            <line x1="19" y1="12" x2="22" y2="12" />
-        </svg>
-    )
-}
-function FeatureIcon() {
-    return (
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="3" />
-            <path d="M12 2v4" />
-            <path d="M12 18v4" />
-            <path d="M2 12h4" />
-            <path d="M18 12h4" />
-        </svg>
-    )
-}
-function SideAskIcon() {
-    return (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15a2 2 0 0 1-2 2H9l-4 4v-4H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-            <path d="M9 8h6" />
-            <path d="M9 12h3" />
-        </svg>
-    )
-}
-function MoreIcon() {
-    return (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="1" />
-            <circle cx="19" cy="12" r="1" />
-            <circle cx="5" cy="12" r="1" />
-        </svg>
-    )
-}
-function AttachIcon() {
-    return (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-        </svg>
-    )
-}
-function WebIcon() {
-    return (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10" />
-            <path d="M2 12h20" />
-            <path d="M12 2a15.3 15.3 0 0 1 0 20" />
-            <path d="M12 2a15.3 15.3 0 0 0 0 20" />
-        </svg>
-    )
-}
-function VoiceIcon() {
-    return (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-            <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-            <path d="M12 19v3" />
-        </svg>
-    )
-}
-function ExportIcon() {
-    return (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <path d="M7 10l5 5 5-5" />
-            <path d="M12 15V3" />
-        </svg>
-    )
-}
-function RefreshIcon({ size = 14 }) {
-    return (
-        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="23 4 23 10 17 10" />
-            <polyline points="1 20 1 14 7 14" />
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" />
-            <path d="M20.49 15A9 9 0 0 1 5.64 18.36L1 14" />
-        </svg>
-    )
-}
-function BotIcon() {
-    return (
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3" y="11" width="18" height="10" rx="2" />
-            <circle cx="12" cy="5" r="2" />
-            <path d="M12 7v4" />
-            <line x1="8" y1="16" x2="8" y2="16" />
-            <line x1="16" y1="16" x2="16" y2="16" />
-        </svg>
-    )
-}
-function UserPlusIcon() {
-    return (
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-            <circle cx="8.5" cy="7" r="4" />
-            <line x1="20" y1="8" x2="20" y2="14" />
-            <line x1="23" y1="11" x2="17" y2="11" />
-        </svg>
-    )
-}
-function PeopleIcon() {
-    return (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-            <circle cx="9" cy="7" r="4" />
-            <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-        </svg>
-    )
-}
-function FilterIcon() {
-    return (
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
-        </svg>
-    )
-}
-function TrashIcon() {
-    return (
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="3 6 5 6 21 6" />
-            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-            <path d="M10 11v6" />
-            <path d="M14 11v6" />
-            <path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" />
-        </svg>
-    )
-}
-function FileIcon() {
-    return (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-            <polyline points="14 2 14 8 20 8" />
-        </svg>
-    )
-}
+/* ---------------- Layout helpers ---------------- */
 function GroupBtn({ children, icon, active, onClick }) {
     return (
         <button
@@ -2303,45 +1924,6 @@ function GroupBtn({ children, icon, active, onClick }) {
             {icon}
             {children}
         </button>
-    )
-}
-function CalendarIcon() {
-    return (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-            <line x1="16" y1="2" x2="16" y2="6" />
-            <line x1="8" y1="2" x2="8" y2="6" />
-            <line x1="3" y1="10" x2="21" y2="10" />
-        </svg>
-    )
-}
-function NoteIcon() {
-    return (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-        </svg>
-    )
-}
-function AgentIcon() {
-    return (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 2v4" />
-            <path d="M12 18v4" />
-            <path d="M2 12h4" />
-            <path d="M18 12h4" />
-            <path d="M5 5l2.8 2.8" />
-            <path d="M16.2 16.2L19 19" />
-            <path d="M5 19l2.8-2.8" />
-            <path d="M16.2 7.8L19 5" />
-        </svg>
-    )
-}
-function ChatBubbleIcon() {
-    return (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-        </svg>
     )
 }
 function PanelToggleBtn({ children, active, onClick, label }) {
@@ -2384,13 +1966,6 @@ function fileTimeAgo(iso) {
     if (hours < 24) return `${hours}h ago`
     const days = Math.floor(hours / 24)
     return `${days}d ago`
-}
-function ChatIcon() {
-    return (
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-        </svg>
-    )
 }
 
 export default Chat

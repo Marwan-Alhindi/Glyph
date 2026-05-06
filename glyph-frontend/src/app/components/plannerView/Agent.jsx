@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { API_BASE } from "../../services/supabase"
-import { useAuth } from "../../contexts/AuthContext"
+import { API_BASE } from "../../../services/supabase"
+import { useAuth } from "../../../contexts/AuthContext"
 
 function countOpenTasks(markdown) {
     if (!markdown) return 0

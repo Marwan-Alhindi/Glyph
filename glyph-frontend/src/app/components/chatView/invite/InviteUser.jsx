@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
-import { supabase, apiFetch } from "../../services/supabase"
-import { useAuth } from "../../contexts/AuthContext"
+import { supabase, apiFetch } from "../../../../services/supabase"
+import { useAuth } from "../../../../contexts/AuthContext"
 
 function InviteUser({ chatId, onClose }) {
     const { user } = useAuth()

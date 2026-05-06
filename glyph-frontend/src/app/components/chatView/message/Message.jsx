@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { getLLMColor, getPersonColor } from "../utils/llmColors"
-import { findMentions } from "../utils/mentions"
+import { getLLMColor, getPersonColor } from "../../../utils/llmColors"
+import { findMentions } from "../../../utils/mentions"
 
 const COLLAPSE_THRESHOLD = 320
 

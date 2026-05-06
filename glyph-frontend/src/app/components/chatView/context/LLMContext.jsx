@@ -1,5 +1,5 @@
-import { getLLMColor, getLLMInitials, modelTypeLabel } from "../utils/llmColors"
-import { findMentions } from "../utils/mentions"
+import { getLLMColor, getLLMInitials, modelTypeLabel } from "../../../utils/llmColors"
+import { findMentions } from "../../../utils/mentions"
 
 function LLMContext({ llm, messages, invitedLLMs = [], onClose }) {
     const c = getLLMColor(llm.display_number)
