@@ -59,6 +59,10 @@ function Chat({ chatId }) {
     const [pendingLLMs, setPendingLLMs] = useState({}) // { llmId: true }
     const pendingLLMIdsRef = useRef(new Set())
     const sendingMessageRef = useRef(false)
+    // Holds the active SSE fetch's AbortController so the user can cancel a
+    // running stream from the UI. Replaced on each new /askLLM call; cleared
+    // when the stream finishes or aborts.
+    const streamControllerRef = useRef(null)
     const markPendingLLM = useCallback((llmId, state = {}) => {
         if (!llmId) return
         pendingLLMIdsRef.current.add(llmId)
@@ -413,6 +417,13 @@ function Chat({ chatId }) {
             if (streamOwnedLLMIds.has(llmId)) clearPendingLLM(llmId)
         }
 
+        // Abort any prior in-flight stream (defensive — there shouldn't be one
+        // because pendingLLMIdsRef gates re-entry, but a stale ref is safer to
+        // null out than to leave dangling).
+        streamControllerRef.current?.abort()
+        const controller = new AbortController()
+        streamControllerRef.current = controller
+
         beginPending(llm.id, { text: "", replaceMessageId, sideMessageId })
         try {
             const res = await fetch(`${API_BASE}/askLLM`, {
@@ -423,7 +434,8 @@ function Chat({ chatId }) {
                     llm_id: llm.id,
                     ...(replaceMessageId ? { replace_message_id: replaceMessageId } : {}),
                     ...(sideMessageId ? { side_message_id: sideMessageId } : {}),
-                })
+                }),
+                signal: controller.signal,
             })
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}))
@@ -471,13 +483,24 @@ function Chat({ chatId }) {
                 }
             }
         } catch (err) {
-            console.error("Ask fetch error:", err)
-            alert(`Could not reach backend at ${API_BASE}: ${err.message}`)
+            // User-initiated abort: just clean up silently. Anything else is a
+            // real network/runtime error and worth surfacing.
+            if (err.name !== 'AbortError') {
+                console.error("Ask fetch error:", err)
+                alert(`Could not reach backend at ${API_BASE}: ${err.message}`)
+            }
         } finally {
             for (const pendingId of streamOwnedLLMIds) {
                 clearPendingLLM(pendingId)
             }
+            if (streamControllerRef.current === controller) {
+                streamControllerRef.current = null
+            }
         }
+    }
+
+    function stopGeneration() {
+        streamControllerRef.current?.abort()
     }
 
     async function handleEditMessage(msg, newContent) {
@@ -1570,6 +1593,51 @@ function Chat({ chatId }) {
                             )
                         })}
 
+                        {/* Pending placeholders — thinking dots while the LLM is
+                            working on a fresh reply. Skipped for regenerations
+                            (those render in-place inside the existing bubble). */}
+                        {Object.entries(pendingLLMs).map(([llmId, state]) => {
+                            if (state?.replaceMessageId) return null
+                            const llm = invitedLLMs.find(l => l.id === llmId)
+                            if (!llm) return null
+                            const c = getLLMColor(llm.display_number)
+                            const text = (state && state.text) || ""
+                            const hasText = text.length > 0
+                            return (
+                                <article
+                                    key={`pending-${llmId}`}
+                                    className={`overflow-hidden rounded-2xl border ${c.softBorder} bg-[var(--color-surface-2)] lp-fade-in`}
+                                >
+                                    <header className="flex items-center gap-2.5 border-b border-[var(--color-line-soft)] px-4 py-2.5">
+                                        <span className={`flex h-7 w-7 items-center justify-center rounded-full ${c.avatarBg} text-[10px] font-semibold ${c.avatarText}`}>
+                                            {getLLMInitials(llm.display_name)}
+                                        </span>
+                                        <span className={`text-sm font-medium ${c.text}`}>{llm.display_name}</span>
+                                        <span className="ml-auto text-[10px] text-[var(--color-fg-subtle)]">{hasText ? 'streaming…' : 'thinking…'}</span>
+                                        <button
+                                            onClick={stopGeneration}
+                                            className="inline-flex items-center gap-1 rounded-md border border-rose-500/30 bg-rose-500/10 px-2 py-0.5 text-[10px] font-medium text-rose-300 hover:bg-rose-500/20 hover:text-rose-200"
+                                            title="Stop generation"
+                                        >
+                                            <span className="h-2 w-2 rounded-sm bg-rose-300" />
+                                            Stop
+                                        </button>
+                                    </header>
+                                    {hasText ? (
+                                        <div className="whitespace-pre-wrap break-words px-4 py-3 text-sm text-[var(--color-fg)]">
+                                            {text}
+                                            <span className="ml-0.5 inline-block h-3.5 w-px translate-y-0.5 animate-pulse bg-[var(--color-fg-subtle)]" />
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center gap-1.5 px-4 py-4">
+                                            <span className={`h-1.5 w-1.5 rounded-full ${c.dot} lp-dot`} />
+                                            <span className={`h-1.5 w-1.5 rounded-full ${c.dot} lp-dot`} style={{ animationDelay: '0.16s' }} />
+                                            <span className={`h-1.5 w-1.5 rounded-full ${c.dot} lp-dot`} style={{ animationDelay: '0.32s' }} />
+                                        </div>
+                                    )}
+                                </article>
+                            )
+                        })}
                     </>
                 )}
             </div>

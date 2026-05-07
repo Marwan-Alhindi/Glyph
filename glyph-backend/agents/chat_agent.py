@@ -14,6 +14,7 @@ The chat row is inserted into Supabase by THIS module (not the agent), so
 the realtime push to other participants still happens at the right moment.
 """
 
+import asyncio
 import json
 from dataclasses import dataclass, field
 
@@ -196,6 +197,12 @@ async def _run_agent_once(
                 output = (event.get("data") or {}).get("output")
                 if isinstance(output, dict) and isinstance(output.get("messages"), list):
                     final_messages = output["messages"]
+    except asyncio.CancelledError:
+        # Client disconnected — likely the user hit "Stop". Do NOT persist a
+        # partial reply and do NOT fire queued delegations: clear them so the
+        # outer loop sees nothing to chain. Re-raise so the SSE generator ends.
+        result.delegations = []
+        raise
     except GraphRecursionError:
         final_text = "I hit my step limit before I could finish. Please ask again with a narrower scope."
     except Exception as e:
@@ -258,15 +265,19 @@ async def run_agent_stream(
         return
 
     root_result = AgentRunResult()
-    async for event in _run_agent_once(
-        chat_id,
-        llm,
-        user_id,
-        root_result,
-        replace_message_id=replace_message_id,
-        side_message_id=side_message_id,
-    ):
-        yield event
+    try:
+        async for event in _run_agent_once(
+            chat_id,
+            llm,
+            user_id,
+            root_result,
+            replace_message_id=replace_message_id,
+            side_message_id=side_message_id,
+        ):
+            yield event
+    except asyncio.CancelledError:
+        # User stopped the root LLM mid-stream. Don't fan out to delegations.
+        raise
 
     seen_targets: set[str] = set()
     for delegation in root_result.delegations:
@@ -291,12 +302,16 @@ async def run_agent_stream(
         })
 
         delegated_result = AgentRunResult()
-        async for event in _run_agent_once(
-            chat_id,
-            target_llm,
-            user_id,
-            delegated_result,
-            force_include_message_id=delegation.message_id,
-            allow_delegation=False,
-        ):
-            yield event
+        try:
+            async for event in _run_agent_once(
+                chat_id,
+                target_llm,
+                user_id,
+                delegated_result,
+                force_include_message_id=delegation.message_id,
+                allow_delegation=False,
+            ):
+                yield event
+        except asyncio.CancelledError:
+            # User stopped during a delegated run. Stop the chain entirely.
+            raise
