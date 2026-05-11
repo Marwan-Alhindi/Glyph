@@ -6,6 +6,7 @@ const COLLAPSE_THRESHOLD = 320
 
 function Message({
     text,
+    attachments = [],
     isMe = false,
     invitedLLMs = [],
     profilesById = {},
@@ -137,8 +138,24 @@ function Message({
         )
     }
 
+    const imageAttachments = (attachments || []).filter(a => (a.mime_type || '').startsWith('image/'))
+    const fileAttachments = (attachments || []).filter(a => !(a.mime_type || '').startsWith('image/'))
+
     return (
         <div className="group/msg relative">
+            {imageAttachments.length > 0 && (
+                <div className="mb-1.5 flex flex-wrap gap-1.5">
+                    {imageAttachments.map((a, i) => (
+                        <a key={i} href={a.url} target="_blank" rel="noopener noreferrer" className="block">
+                            <img
+                                src={a.url}
+                                alt={a.filename || 'image'}
+                                className="max-h-48 max-w-xs rounded-xl border border-[var(--color-line-soft)] object-cover hover:opacity-90 transition-opacity"
+                            />
+                        </a>
+                    ))}
+                </div>
+            )}
             <div
                 className={`whitespace-pre-wrap break-words rounded-2xl border px-3.5 py-2 text-sm leading-relaxed text-[var(--color-fg)] ${
                     isMe
@@ -155,6 +172,23 @@ function Message({
                     >
                         {expanded ? 'show less' : 'show more'}
                     </button>
+                )}
+                {fileAttachments.length > 0 && (
+                    <div className="mt-2 flex flex-col gap-1">
+                        {fileAttachments.map((a, i) => (
+                            <a
+                                key={i}
+                                href={a.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-line-soft)] bg-[var(--color-surface-1)] px-2 py-1 text-[11px] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] transition-colors w-fit"
+                            >
+                                <FileAttachIcon />
+                                <span className="max-w-[200px] truncate">{a.filename}</span>
+                                {a.size > 0 && <span className="ml-auto pl-2 opacity-60">{formatFileSize(a.size)}</span>}
+                            </a>
+                        ))}
+                    </div>
                 )}
                 {isEdited && (
                     <span className="ml-1.5 text-[10px] text-[var(--color-fg-subtle)]" title={`Edited ${new Date(editedAt).toLocaleString()}`}>
@@ -227,6 +261,21 @@ function renderSegments(segments, maxChars) {
         }
     }
     return out
+}
+
+function formatFileSize(bytes) {
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function FileAttachIcon() {
+    return (
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+        </svg>
+    )
 }
 
 function PencilIcon({ size = 14 }) {

@@ -14,9 +14,9 @@ import {
     SendIcon, TargetIcon, FeatureIcon, SideAskIcon, MoreIcon, AttachIcon,
     WebIcon, VoiceIcon, ExportIcon, RefreshIcon, BotIcon, UserPlusIcon,
     PeopleIcon, FilterIcon, TrashIcon, FileIcon, CalendarIcon, NoteIcon,
-    AgentIcon, ChatBubbleIcon, ChatIcon,
+    AgentIcon, ChatBubbleIcon, ChatIcon, XIcon, ImageIcon,
 } from "./Icons"
-import { API_BASE, apiFetch } from "../../services/supabase"
+import { API_BASE, apiFetch, apiUpload } from "../../services/supabase"
 import { useAuth } from "../../contexts/AuthContext"
 import { getLLMColor, getLLMInitials, getPersonColor, modelTypeLabel } from "../utils/llmColors"
 import { findMentions, isMentionPrefix } from "../utils/mentions"
@@ -100,6 +100,9 @@ function Chat({ chatId }) {
     } = useChatMessages(chatId, { onLLMReply: handleLLMReply })
 
     const [inputText, setInputText] = useState("")
+    const [pendingAttachments, setPendingAttachments] = useState([]) // [{url,mime_type,filename,size,localPreview?,uploading?}]
+    const [isDragOver, setIsDragOver] = useState(false)
+    const fileInputRef = useRef(null)
     const [InviteLLMpop, setInviteLLMpop] = useState(false)
     const [deleteMessageTarget, setDeleteMessageTarget] = useState(null)
     const [deleteMessagePending, setDeleteMessagePending] = useState(false)
@@ -116,9 +119,36 @@ function Chat({ chatId }) {
     const [showInviteUser, setShowInviteUser] = useState(false)
     const [mobileTab, setMobileTab] = useState("team") // "team" | "models"
     const [teamFilterUserId, setTeamFilterUserId] = useState(null)
-    const [workspaceFilterLLMId, setWorkspaceFilterLLMId] = useState(null)
-    const [showTeamFilterDropdown, setShowTeamFilterDropdown] = useState(false)
+    const [workspaceTabs, setWorkspaceTabs] = useState(() => [{ id: 'tab-1', filterId: null }])
+    const [activeTabId, setActiveTabId] = useState('tab-1')
     const [showWorkspaceFilterDropdown, setShowWorkspaceFilterDropdown] = useState(false)
+    const [showTeamFilterDropdown, setShowTeamFilterDropdown] = useState(false)
+
+    // Derived workspace tab state — keeps all downstream code that reads
+    // workspaceFilterLLMId / setWorkspaceFilterLLMId working unchanged.
+    const activeWorkspaceTab = useMemo(
+        () => workspaceTabs.find(t => t.id === activeTabId) ?? workspaceTabs[0],
+        [workspaceTabs, activeTabId]
+    )
+    const workspaceFilterLLMId = activeWorkspaceTab?.filterId ?? null
+    function setWorkspaceFilterLLMId(filterId) {
+        setWorkspaceTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, filterId } : t))
+    }
+    function addWorkspaceTab() {
+        const id = `tab-${Date.now()}`
+        setWorkspaceTabs(prev => [...prev, { id, filterId: null }])
+        setActiveTabId(id)
+    }
+    function closeWorkspaceTab(tabId, e) {
+        e.stopPropagation()
+        setWorkspaceTabs(prev => {
+            if (prev.length <= 1) return prev
+            const idx = prev.findIndex(t => t.id === tabId)
+            const next = prev.filter(t => t.id !== tabId)
+            if (activeTabId === tabId) setActiveTabId(next[Math.max(0, idx - 1)]?.id ?? next[0]?.id)
+            return next
+        })
+    }
     const [panelWidths, setPanelWidths] = useState(() => {
         try {
             const saved = JSON.parse(localStorage.getItem("glyph.panelWidths") || "null")
@@ -357,15 +387,49 @@ function Chat({ chatId }) {
         setShowMentionDropdown(false)
     }
 
+    async function handleFilesSelected(files) {
+        const fileArray = Array.from(files)
+        if (!fileArray.length) return
+        // Add placeholders immediately so the user sees them
+        const placeholders = fileArray.map(f => ({
+            _key: `${f.name}-${Date.now()}-${Math.random()}`,
+            filename: f.name,
+            mime_type: f.type || 'application/octet-stream',
+            size: f.size,
+            localPreview: f.type?.startsWith('image/') ? URL.createObjectURL(f) : null,
+            uploading: true,
+            url: null,
+        }))
+        setPendingAttachments(prev => [...prev, ...placeholders])
+        // Upload each file and replace the placeholder with the real URL
+        await Promise.all(fileArray.map(async (file, i) => {
+            const key = placeholders[i]._key
+            try {
+                const result = await apiUpload(file)
+                setPendingAttachments(prev => prev.map(a =>
+                    a._key === key ? { ...a, ...result, uploading: false } : a
+                ))
+            } catch (err) {
+                setPendingAttachments(prev => prev.map(a =>
+                    a._key === key ? { ...a, uploading: false, error: err.detail || err.message } : a
+                ))
+            }
+        }))
+    }
+
     async function handleSendMessage() {
-        if (!inputText.trim() || sendingMessageRef.current) return
+        if ((!inputText.trim() && pendingAttachments.length === 0) || sendingMessageRef.current) return
+        const stillUploading = pendingAttachments.some(a => a.uploading)
+        if (stillUploading) { alert('Please wait for uploads to finish.'); return }
         sendingMessageRef.current = true
         const text = inputText
+        const attachments = pendingAttachments.filter(a => a.url).map(({ url, mime_type, filename, size }) => ({ url, mime_type, filename, size }))
         const isSideAsk = sideAskActive
         const manualMentions = findMentions(text, mentionables)
         const effectiveTarget = manualMentions.length === 0 ? stickyMentionTarget : null
         const messageText = effectiveTarget ? `@${effectiveTarget.display_name} ${text}` : text
         setInputText("")
+        setPendingAttachments([])
         setShowMentionDropdown(false)
         setShowStickyTargetDropdown(false)
 
@@ -377,12 +441,14 @@ function Chat({ chatId }) {
                     chat_id: chatId,
                     content: messageText,
                     included_in_context: !isSideAsk,
+                    attachments,
                 },
             })
         } catch (err) {
             console.error('Message insert error:', err)
             alert('Failed to send message: ' + (err.detail || err.message))
             setInputText(text)
+            setPendingAttachments(attachments.map(a => ({ ...a })))
             setSideAskActive(isSideAsk)
             sendingMessageRef.current = false
             return
@@ -725,27 +791,22 @@ function Chat({ chatId }) {
         if (teamFilterUserId && !profilesById[teamFilterUserId]) setTeamFilterUserId(null)
     }, [teamFilterUserId, profilesById])
     useEffect(() => {
-        if (workspaceFilterLLMId && !invitedLLMs.some(l => l.id === workspaceFilterLLMId)) {
-            setWorkspaceFilterLLMId(null)
-        }
-    }, [workspaceFilterLLMId, invitedLLMs])
+        setWorkspaceTabs(prev => prev.map(t =>
+            t.filterId && !invitedLLMs.some(l => l.id === t.filterId)
+                ? { ...t, filterId: null }
+                : t
+        ))
+    }, [invitedLLMs])
 
     // Close filter dropdowns on outside click / Escape
     useEffect(() => {
         if (!showTeamFilterDropdown && !showWorkspaceFilterDropdown) return
         function onDown(e) {
-            if (showTeamFilterDropdown && !e.target.closest?.('[data-filter="team"]')) {
-                setShowTeamFilterDropdown(false)
-            }
-            if (showWorkspaceFilterDropdown && !e.target.closest?.('[data-filter="workspace"]')) {
-                setShowWorkspaceFilterDropdown(false)
-            }
+            if (showTeamFilterDropdown && !e.target.closest?.('[data-filter="team"]')) setShowTeamFilterDropdown(false)
+            if (showWorkspaceFilterDropdown && !e.target.closest?.('[data-filter="workspace"]')) setShowWorkspaceFilterDropdown(false)
         }
         function onKey(e) {
-            if (e.key === 'Escape') {
-                setShowTeamFilterDropdown(false)
-                setShowWorkspaceFilterDropdown(false)
-            }
+            if (e.key === 'Escape') { setShowTeamFilterDropdown(false); setShowWorkspaceFilterDropdown(false) }
         }
         document.addEventListener('mousedown', onDown)
         document.addEventListener('keydown', onKey)
@@ -765,7 +826,7 @@ function Chat({ chatId }) {
     }, [mentionables, mentionFilter])
 
     // Split messages into team (user + system) and models (llm)
-    const { teamMessages, modelMessages, teamMessagesAll, modelMessagesAll } = useMemo(() => {
+    const { teamMessages, modelMessages, teamMessagesAll } = useMemo(() => {
         const teamAll = []
         const modelAll = []
         for (const msg of messages) {
@@ -779,7 +840,7 @@ function Chat({ chatId }) {
         const model = workspaceFilterLLMId
             ? modelAll.filter(m => m.sender_llm_id === workspaceFilterLLMId)
             : modelAll
-        return { teamMessages: team, modelMessages: model, teamMessagesAll: teamAll, modelMessagesAll: modelAll }
+        return { teamMessages: team, modelMessages: model, teamMessagesAll: teamAll }
     }, [messages, teamFilterUserId, workspaceFilterLLMId])
 
     // Extract generated files from message content (markdown links to known extensions)
@@ -1129,7 +1190,7 @@ function Chat({ chatId }) {
             />
             {showFeatureMore && (
                 <div className="absolute bottom-11 right-0 w-52 overflow-hidden rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] py-1 shadow-2xl">
-                    <FeatureMoreItem icon={<AttachIcon />} label="Attach file" detail="Placeholder" />
+                    <FeatureMoreItem icon={<AttachIcon />} label="Attach file" detail="Images, PDFs, code…" onClick={() => { fileInputRef.current?.click(); setShowFeatureMore(false) }} />
                     <FeatureMoreItem icon={<WebIcon />} label="Web search" detail="Placeholder" />
                     <FeatureMoreItem icon={<VoiceIcon />} label="Voice note" detail="Placeholder" />
                     <div className="my-1 border-t border-[var(--color-line-soft)]" />
@@ -1141,47 +1202,98 @@ function Chat({ chatId }) {
 
     /* ---------- Input ---------- */
     const inputBar = (
-        <div className="border-t border-[var(--color-line-soft)] bg-[var(--color-surface-1)] px-4 py-3">
+        <div
+            className={`border-t border-[var(--color-line-soft)] bg-[var(--color-surface-1)] px-4 py-3 transition-colors ${isDragOver ? 'bg-[var(--color-brand)]/5 border-[var(--color-brand)]' : ''}`}
+            onDragOver={(e) => { e.preventDefault(); setIsDragOver(true) }}
+            onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setIsDragOver(false) }}
+            onDrop={(e) => {
+                e.preventDefault()
+                setIsDragOver(false)
+                handleFilesSelected(e.dataTransfer.files)
+            }}
+        >
+            {/* Hidden file input */}
+            <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept="image/*,.pdf,.txt,.md,.csv,.json,.js,.ts,.tsx,.jsx,.py,.html,.css,.xml,.yaml,.yml"
+                className="hidden"
+                onChange={(e) => { handleFilesSelected(e.target.files); e.target.value = '' }}
+            />
             <div ref={composerRef} className="relative">
                 {mentionDropdown}
                 {stickyTargetDropdown}
                 {activeFeatureStrips}
-                <div className="flex items-end gap-2 rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-2)] px-3 py-2 transition-colors focus-within:border-[var(--color-fg-subtle)]">
-                    <button
-                        onClick={() => {
-                            setShowFeatureTray(v => !v)
-                            setShowStickyTargetDropdown(false)
-                            setShowMentionDropdown(false)
-                        }}
-                        className={`relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] ${showFeatureTray ? 'border-[var(--color-fg-subtle)] bg-[var(--color-surface-3)]' : 'border-[var(--color-line)]'}`}
-                        aria-label="Open message features"
-                        title="Message features"
-                    >
-                        <FeatureIcon />
-                    </button>
-                    {featureTray}
-                    <textarea
-                        ref={inputRef}
-                        rows={1}
-                        placeholder="Message your team — type @ to mention people or models"
-                        value={inputText}
-                        onChange={handleInputChange}
-                        onKeyDown={(e) => {
-                            if (e.key === 'Enter' && !e.shiftKey) {
-                                e.preventDefault()
-                                handleSendMessage()
-                            }
-                        }}
-                        className="block max-h-40 w-full resize-none bg-transparent py-1.5 text-sm text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] outline-none"
-                    />
-                    <button
-                        onClick={handleSendMessage}
-                        disabled={!inputText.trim()}
-                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-black transition-all hover:bg-[var(--color-brand)] disabled:opacity-40"
-                        aria-label="Send"
-                    >
-                        <SendIcon />
-                    </button>
+                <div className={`rounded-2xl border bg-[var(--color-surface-2)] px-3 py-2 transition-colors focus-within:border-[var(--color-fg-subtle)] ${isDragOver ? 'border-[var(--color-brand)]' : 'border-[var(--color-line)]'}`}>
+                    {/* Attachment chips */}
+                    {pendingAttachments.length > 0 && (
+                        <div className="mb-2 flex flex-wrap gap-1.5">
+                            {pendingAttachments.map((a) => (
+                                <div
+                                    key={a._key}
+                                    className={`group relative flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] transition-colors ${
+                                        a.error
+                                            ? 'border-rose-500/40 bg-rose-500/10 text-rose-400'
+                                            : 'border-[var(--color-line)] bg-[var(--color-surface-3)] text-[var(--color-fg-muted)]'
+                                    }`}
+                                >
+                                    {a.localPreview ? (
+                                        <img src={a.localPreview} alt="" className="h-5 w-5 rounded object-cover" />
+                                    ) : (
+                                        <ImageIcon size={12} />
+                                    )}
+                                    <span className="max-w-[120px] truncate">{a.filename}</span>
+                                    {a.uploading && <span className="ml-0.5 opacity-60">↑</span>}
+                                    {a.error && <span className="ml-0.5" title={a.error}>!</span>}
+                                    <button
+                                        onClick={() => setPendingAttachments(prev => prev.filter(x => x._key !== a._key))}
+                                        className="ml-0.5 opacity-0 transition-opacity group-hover:opacity-100 hover:text-[var(--color-fg)]"
+                                        aria-label="Remove attachment"
+                                    >
+                                        <XIcon size={10} />
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                    <div className="flex items-end gap-2">
+                        <button
+                            onClick={() => {
+                                setShowFeatureTray(v => !v)
+                                setShowStickyTargetDropdown(false)
+                                setShowMentionDropdown(false)
+                            }}
+                            className={`relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] ${showFeatureTray ? 'border-[var(--color-fg-subtle)] bg-[var(--color-surface-3)]' : 'border-[var(--color-line)]'}`}
+                            aria-label="Open message features"
+                            title="Message features"
+                        >
+                            <FeatureIcon />
+                        </button>
+                        {featureTray}
+                        <textarea
+                            ref={inputRef}
+                            rows={1}
+                            placeholder={isDragOver ? 'Drop files here…' : 'Message your team — type @ to mention people or models'}
+                            value={inputText}
+                            onChange={handleInputChange}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' && !e.shiftKey) {
+                                    e.preventDefault()
+                                    handleSendMessage()
+                                }
+                            }}
+                            className="block max-h-40 w-full resize-none bg-transparent py-1.5 text-sm text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] outline-none"
+                        />
+                        <button
+                            onClick={handleSendMessage}
+                            disabled={!inputText.trim() && pendingAttachments.length === 0}
+                            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-black transition-all hover:bg-[var(--color-brand)] disabled:opacity-40"
+                            aria-label="Send"
+                        >
+                            <SendIcon />
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1391,6 +1503,7 @@ function Chat({ chatId }) {
                                     )}
                                     <Message
                                         text={msg.content}
+                                        attachments={msg.attachments}
                                         isMe={isMe}
                                         invitedLLMs={invitedLLMs}
                                         profilesById={profilesById}
@@ -1411,53 +1524,101 @@ function Chat({ chatId }) {
     )
 
     /* ---------- Models pane (right) ---------- */
-    const workspaceFilterLLM = workspaceFilterLLMId
-        ? invitedLLMs.find(l => l.id === workspaceFilterLLMId)
-        : null
+    const workspaceFilterLLM = workspaceFilterLLMId ? invitedLLMs.find(l => l.id === workspaceFilterLLMId) : null
     const workspaceFilterColor = workspaceFilterLLM ? getLLMColor(workspaceFilterLLM.display_number) : null
     const modelsPane = (
         <section className="flex min-h-0 flex-1 flex-col border-[var(--color-line-soft)] bg-[var(--color-surface-1)] md:border-l">
-            <div className="flex items-center justify-between border-b border-[var(--color-line-soft)] px-4 py-2">
-                <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-semibold uppercase tracking-widest text-[var(--color-fg-subtle)]">
-                        Workspace
-                    </span>
+            {/* Chrome-style tab bar */}
+            <div className="flex items-end border-b border-[var(--color-line-soft)] bg-[var(--color-surface-2)]">
+                {/* Scrollable tab strip */}
+                <div className="flex min-w-0 flex-1 items-end overflow-x-auto">
+                    {workspaceTabs.map(tab => {
+                        const isActive = tab.id === activeTabId
+                        const tabLLM = tab.filterId ? invitedLLMs.find(l => l.id === tab.filterId) : null
+                        const tc = tabLLM ? getLLMColor(tabLLM.display_number) : null
+                        const hasPending = tabLLM ? !!pendingLLMs[tabLLM.id] : Object.keys(pendingLLMs).length > 0
+                        return (
+                            <button
+                                key={tab.id}
+                                type="button"
+                                onClick={() => setActiveTabId(tab.id)}
+                                className={`group relative flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-2 text-[11px] font-medium transition-colors ${
+                                    isActive
+                                        ? 'rounded-t-lg border border-b-0 border-[var(--color-line-soft)] bg-[var(--color-surface-1)] text-[var(--color-fg)] -mb-px'
+                                        : 'text-[var(--color-fg-subtle)] hover:text-[var(--color-fg-muted)]'
+                                }`}
+                            >
+                                {tabLLM ? (
+                                    <span className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full text-[7px] font-bold ${tc.avatarBg} ${tc.avatarText}`}>
+                                        {getLLMInitials(tabLLM.display_name)}
+                                    </span>
+                                ) : (
+                                    <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border border-[var(--color-line-soft)] text-[var(--color-fg-subtle)]">
+                                        <BotIcon />
+                                    </span>
+                                )}
+                                <span className="max-w-[7rem] truncate">
+                                    {tabLLM ? tabLLM.display_name : 'All'}
+                                </span>
+                                {hasPending && (
+                                    <span className={`h-1.5 w-1.5 rounded-full animate-pulse ${tc ? tc.avatarBg : 'bg-[var(--color-fg-subtle)]'}`} />
+                                )}
+                                {workspaceTabs.length > 1 && (
+                                    <span
+                                        role="button"
+                                        onClick={(e) => closeWorkspaceTab(tab.id, e)}
+                                        className="ml-0.5 flex h-3.5 w-3.5 items-center justify-center rounded opacity-0 transition-opacity hover:bg-[var(--color-surface-3)] hover:text-rose-400 hover:!opacity-100 group-hover:opacity-50"
+                                    >
+                                        <XIcon size={8} />
+                                    </span>
+                                )}
+                            </button>
+                        )
+                    })}
+                    {/* + new tab */}
+                    <button
+                        type="button"
+                        onClick={addWorkspaceTab}
+                        className="flex h-8 w-7 shrink-0 items-center justify-center self-center text-base text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] transition-colors"
+                        title="New tab"
+                    >
+                        +
+                    </button>
+                </div>
+
+                {/* Right controls: per-tab filter + invite */}
+                <div className="flex shrink-0 items-center gap-2 px-3 pb-1.5">
                     <div className="relative" data-filter="workspace">
                         <button
                             type="button"
                             onClick={() => setShowWorkspaceFilterDropdown(v => !v)}
                             className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] transition-colors ${
                                 workspaceFilterLLMId
-                                    ? `${workspaceFilterColor?.softBorder || 'border-[var(--color-line)]'} ${workspaceFilterColor?.softBg || 'bg-[var(--color-surface-2)]'} ${workspaceFilterColor?.text || 'text-[var(--color-fg)]'}`
-                                    : 'border-[var(--color-line-soft)] bg-transparent text-[var(--color-fg-subtle)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-fg-muted)]'
+                                    ? `${workspaceFilterColor?.softBorder || 'border-[var(--color-line)]'} ${workspaceFilterColor?.softBg || ''} ${workspaceFilterColor?.text || ''}`
+                                    : 'border-[var(--color-line-soft)] text-[var(--color-fg-subtle)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-fg-muted)]'
                             }`}
-                            title="Filter by AI"
+                            title="Filter this tab"
                         >
                             <FilterIcon />
-                            <span className="max-w-[8rem] truncate">
+                            <span className="max-w-[7rem] truncate">
                                 {workspaceFilterLLM ? workspaceFilterLLM.display_name : 'All models'}
                             </span>
-                            <span className="text-[8px] leading-none">▾</span>
+                            <span className="text-[8px]">▾</span>
                         </button>
                         {showWorkspaceFilterDropdown && (
-                            <div className="lp-scroll absolute left-0 top-full z-30 mt-1 max-h-72 w-60 overflow-y-auto rounded-lg border border-[var(--color-line)] bg-[var(--color-surface-2)] shadow-2xl">
+                            <div className="lp-scroll absolute right-0 top-full z-30 mt-1 max-h-72 w-56 overflow-y-auto rounded-lg border border-[var(--color-line)] bg-[var(--color-surface-2)] shadow-2xl">
                                 <button
                                     type="button"
                                     onClick={() => { setWorkspaceFilterLLMId(null); setShowWorkspaceFilterDropdown(false) }}
                                     className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-[var(--color-fg)] hover:bg-[var(--color-surface-3)]"
                                 >
-                                    <span className="flex h-5 w-5 items-center justify-center rounded-full border border-[var(--color-line-soft)] text-[var(--color-fg-subtle)]">
-                                        <BotIcon />
-                                    </span>
+                                    <span className="flex h-5 w-5 items-center justify-center rounded-full border border-[var(--color-line-soft)] text-[var(--color-fg-subtle)]"><BotIcon /></span>
                                     <span>All models</span>
                                     {!workspaceFilterLLMId && <span className="ml-auto text-[var(--color-fg-subtle)]">✓</span>}
                                 </button>
-                                {invitedLLMs.length > 0 && (
-                                    <div className="border-t border-[var(--color-line-soft)]" />
-                                )}
+                                {invitedLLMs.length > 0 && <div className="border-t border-[var(--color-line-soft)]" />}
                                 {invitedLLMs.map(llm => {
                                     const c = getLLMColor(llm.display_number)
-                                    const isActive = workspaceFilterLLMId === llm.id
                                     return (
                                         <button
                                             key={llm.id}
@@ -1469,25 +1630,16 @@ function Chat({ chatId }) {
                                                 {getLLMInitials(llm.display_name)}
                                             </span>
                                             <span className="truncate">{llm.display_name}</span>
-                                            <span className="ml-auto text-[10px] text-[var(--color-fg-subtle)]">
-                                                {isActive ? '✓' : `#${llm.display_number}`}
-                                            </span>
+                                            {workspaceFilterLLMId === llm.id && <span className="ml-auto text-[var(--color-fg-subtle)]">✓</span>}
                                         </button>
                                     )
                                 })}
                             </div>
                         )}
                     </div>
-                </div>
-                <div className="flex items-center gap-3">
-                    {workspaceFilterLLMId && (
-                        <span className="text-[10px] text-[var(--color-fg-subtle)]">
-                            {modelMessages.filter(m => m.kind !== 'join').length} of {modelMessagesAll.filter(m => m.kind !== 'join').length}
-                        </span>
-                    )}
                     <button
                         onClick={() => setInviteLLMpop(true)}
-                        className="text-[11px] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]"
+                        className="text-[11px] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] whitespace-nowrap"
                     >
                         + Invite model
                     </button>
@@ -1898,11 +2050,11 @@ function FeatureAction({ active, activeClass = "", icon, label, popoverTitle, po
     )
 }
 
-function FeatureMoreItem({ icon, label, detail }) {
+function FeatureMoreItem({ icon, label, detail, onClick }) {
     return (
         <button
             type="button"
-            onClick={() => {}}
+            onClick={onClick ?? (() => {})}
             className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-[var(--color-surface-3)]"
         >
             <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[var(--color-line-soft)] text-[var(--color-fg-muted)]">

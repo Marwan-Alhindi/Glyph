@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from auth import get_current_user, verify_participant
 from config import supabase
+from schemas import AttachmentInfo
 
 
 router = APIRouter()
@@ -34,6 +35,7 @@ class CreateMessageRequest(BaseModel):
     chat_id: str
     content: str
     included_in_context: bool = True
+    attachments: list[AttachmentInfo] = Field(default_factory=list)
     # `kind` is intentionally not exposed: the column has a 'chat' default and
     # system markers ('join', 'leave', 'delegation') are produced server-side
     # by their dedicated endpoints/tools, not by clients.
@@ -71,6 +73,7 @@ def create_message(body: CreateMessageRequest, authorization: str = Header()):
             "sender_user_id": user_id,
             "content": content,
             "included_in_context": body.included_in_context,
+            "attachments": [a.model_dump() for a in body.attachments],
         })
         .execute()
     )

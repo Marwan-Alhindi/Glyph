@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from config import PDFS_DIR, setup_tracing
+from config import CHARTS_DIR, FILES_DIR, PDFS_DIR, setup_tracing
 from auth import get_current_user, verify_participant
 from schemas import AskLLMRequest, PlanAgentRequest
 from agents.chat_agent import run_agent_stream
@@ -29,6 +29,7 @@ from chats import router as chats_router
 from messages import router as messages_router
 from participants import router as participants_router
 from invitations import router as invitations_router
+from uploads import router as uploads_router
 
 from fastapi import Header
 
@@ -47,6 +48,8 @@ app.add_middleware(
 )
 
 app.mount("/pdfs", StaticFiles(directory=PDFS_DIR), name="pdfs")
+app.mount("/charts", StaticFiles(directory=CHARTS_DIR), name="charts")
+app.mount("/files", StaticFiles(directory=FILES_DIR), name="files")
 
 
 @app.get("/")
@@ -87,3 +90,4 @@ app.include_router(chats_router)
 app.include_router(messages_router)
 app.include_router(participants_router)
 app.include_router(invitations_router)
+app.include_router(uploads_router)

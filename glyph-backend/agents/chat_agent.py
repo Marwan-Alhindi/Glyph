@@ -90,6 +90,7 @@ def _augment_system_prompt(
     ctx: ToolContext,
     llm_name: str,
     allow_delegation: bool,
+    gather_mode: bool = False,
 ) -> str:
     """Append mention/delegation rules so @mentions are interpreted as routing."""
     normalized_self = normalize_llm_name(llm_name)
@@ -101,7 +102,12 @@ def _augment_system_prompt(
         "If you receive a message like `OtherModel: -> @You: task`, that is an internal delegated task for you. Do the task directly.",
         "The user should only see final outcomes. Do not mention internal handoff messages, tool calls, delegation status, or phrases like 'I will now share this' in your final reply.",
     ]
-    if allow_delegation:
+    if gather_mode:
+        lines.append(
+            "All models you delegated to have now completed their tasks. Their responses are included in the conversation above. "
+            "Synthesize their results to complete the original user request. Do not delegate further — produce the final answer directly."
+        )
+    elif allow_delegation:
         lines.append(
             "When the user asks you to share, hand off, or provide your findings to another model, first complete your own work, then call the `delegate` tool with the target model and a self-contained task that includes the useful results or context they need."
         )
@@ -141,8 +147,9 @@ async def _run_agent_once(
     result: AgentRunResult,
     replace_message_id: str | None = None,
     side_message_id: str | None = None,
-    force_include_message_id: str | None = None,
+    force_include_message_ids: set[str] | None = None,
     allow_delegation: bool = True,
+    gather_mode: bool = False,
 ):
     llm_id = llm["id"]
     tool_ctx = _build_tool_context(chat_id, llm_id)
@@ -152,6 +159,7 @@ async def _run_agent_once(
         tool_ctx,
         llm_name,
         allow_delegation,
+        gather_mode=gather_mode,
     )
 
     initial_messages = build_context_messages(
@@ -160,7 +168,7 @@ async def _run_agent_once(
         augmented_system_prompt,
         up_to_message_id=replace_message_id,
         include_message_id=side_message_id,
-        force_include_message_id=force_include_message_id,
+        force_include_message_ids=force_include_message_ids,
     )
 
     # Only the user-addressed root model can delegate. Delegated models answer
@@ -280,6 +288,7 @@ async def run_agent_stream(
         raise
 
     seen_targets: set[str] = set()
+    delegated_results: list[AgentRunResult] = []
     for delegation in root_result.delegations:
         if delegation.target_llm_id in seen_targets:
             continue
@@ -308,10 +317,42 @@ async def run_agent_stream(
                 target_llm,
                 user_id,
                 delegated_result,
-                force_include_message_id=delegation.message_id,
+                force_include_message_ids={delegation.message_id} if delegation.message_id else None,
                 allow_delegation=False,
             ):
                 yield event
         except asyncio.CancelledError:
             # User stopped during a delegated run. Stop the chain entirely.
+            raise
+        delegated_results.append(delegated_result)
+
+    # Gather phase: if any delegations ran, re-run the root LLM so it can
+    # synthesize all sub-agent results into a final reply.
+    if delegated_results:
+        # Force-include the delegation task messages and all sub-agent replies
+        # so the root LLM can see the full picture even for messages that were
+        # marked included_in_context=false.
+        force_ids: set[str] = set()
+        for d in root_result.delegations:
+            if d.message_id:
+                force_ids.add(d.message_id)
+        for dr in delegated_results:
+            if dr.message_id:
+                force_ids.add(dr.message_id)
+
+        yield _sse({"type": "agent_start", "llm_id": llm_id, "gather": True})
+
+        gather_result = AgentRunResult()
+        try:
+            async for event in _run_agent_once(
+                chat_id,
+                llm,
+                user_id,
+                gather_result,
+                force_include_message_ids=force_ids if force_ids else None,
+                allow_delegation=False,
+                gather_mode=True,
+            ):
+                yield event
+        except asyncio.CancelledError:
             raise

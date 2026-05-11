@@ -40,3 +40,29 @@ export async function apiFetch(path, { method = "GET", body, headers = {}, auth 
     }
     return data
 }
+
+/**
+ * Upload a File object to POST /uploads (multipart/form-data).
+ * Returns { url, mime_type, filename, size }.
+ */
+export async function apiUpload(file) {
+    const { data: { session } } = await supabase.auth.getSession()
+    const form = new FormData()
+    form.append("file", file)
+    const res = await fetch(`${API_BASE}/uploads`, {
+        method: "POST",
+        headers: session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {},
+        body: form,
+    })
+    let data = null
+    const text = await res.text()
+    if (text) { try { data = JSON.parse(text) } catch { data = text } }
+    if (!res.ok) {
+        const detail = (data && typeof data === "object" && data.detail) || data || res.statusText
+        const err = new Error(typeof detail === "string" ? detail : "Upload failed")
+        err.status = res.status
+        err.detail = detail
+        throw err
+    }
+    return data
+}

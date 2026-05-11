@@ -6,6 +6,13 @@ Kept in one place so route handlers and agent modules share the same types.
 from pydantic import BaseModel, Field
 
 
+class AttachmentInfo(BaseModel):
+    url: str
+    mime_type: str
+    filename: str
+    size: int = 0
+
+
 class AskLLMRequest(BaseModel):
     chat_id: str
     llm_id: str

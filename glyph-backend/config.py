@@ -15,7 +15,11 @@ load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 
 PDFS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pdfs")
+CHARTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "charts")
+FILES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "files")
 os.makedirs(PDFS_DIR, exist_ok=True)
+os.makedirs(CHARTS_DIR, exist_ok=True)
+os.makedirs(FILES_DIR, exist_ok=True)
 
 
 supabase = create_client(

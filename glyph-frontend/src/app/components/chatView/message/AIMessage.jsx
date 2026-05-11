@@ -138,6 +138,19 @@ function AIMessage({ text }) {
                             </a>
                         )
                     },
+                    img({ src, alt }) {
+                        return (
+                            <a href={src} target="_blank" rel="noopener noreferrer" className="block my-3">
+                                <img
+                                    src={src}
+                                    alt={alt || ''}
+                                    className="max-w-full rounded-xl border border-[var(--color-line-soft)] shadow-md hover:opacity-90 transition-opacity cursor-zoom-in"
+                                    style={{ maxHeight: '480px', objectFit: 'contain' }}
+                                />
+                                {alt && <span className="mt-1 block text-[11px] text-[var(--color-fg-subtle)]">{alt}</span>}
+                            </a>
+                        )
+                    },
                 }}
             >
                 {text}
