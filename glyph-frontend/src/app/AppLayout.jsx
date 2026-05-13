@@ -3,12 +3,14 @@ import { Outlet, useNavigate, useLocation } from "react-router-dom"
 import { useAuth } from "../contexts/AuthContext"
 import { useLanguage } from "../contexts/LanguageContext"
 import { supabase, apiFetch } from "../services/supabase"
+import { useUsage } from "./hooks/useUsage"
 
 function AppLayout() {
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
     const [chats, setChats] = useState([])
     const [landingInput, setLandingInput] = useState("")
     const [userMenuOpen, setUserMenuOpen] = useState(false)
+    const [billingOpen, setBillingOpen] = useState(false)
     const [leaveChatTarget, setLeaveChatTarget] = useState(null)
     const [leavePending, setLeavePending] = useState(false)
     const [renamingChatId, setRenamingChatId] = useState(null)
@@ -18,6 +20,7 @@ function AppLayout() {
 
     const { user, logout } = useAuth()
     const { t, lang, setLang } = useLanguage()
+    const usage = useUsage(user)
     const ta = t.app
     const navigate = useNavigate()
     const location = useLocation()
@@ -219,6 +222,14 @@ function AppLayout() {
 
     return (
         <div className="relative h-screen w-screen overflow-hidden bg-[var(--color-canvas)] text-[var(--color-fg)]">
+            {/* Billing Modal */}
+            {billingOpen && (
+                <BillingModal
+                    currentPlan={usage?.plan || 'free'}
+                    onClose={() => setBillingOpen(false)}
+                />
+            )}
+
             {/* Leave Chat Modal */}
             {leaveChatTarget && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
@@ -411,6 +422,31 @@ function AppLayout() {
 
                     {/* User + lang toggle */}
                     <div className="relative mt-auto border-t border-[var(--color-line-soft)] p-2" ref={userMenuRef}>
+                        {/* Usage bar */}
+                        {!sidebarCollapsed && usage && (
+                            <div className="mb-2 px-1">
+                                <div className="mb-1 flex items-center justify-between">
+                                    <span className="text-[10px] font-semibold uppercase tracking-widest text-[var(--color-fg-subtle)] capitalize">
+                                        {usage.plan}
+                                    </span>
+                                    <span className="text-[10px] text-[var(--color-fg-subtle)]">
+                                        {formatTokens(usage.tokens_used)} / {formatTokens(usage.tokens_limit)}
+                                    </span>
+                                </div>
+                                <div className="h-1 overflow-hidden rounded-full bg-[var(--color-line)]">
+                                    <div
+                                        className={`h-full rounded-full transition-all ${
+                                            usage.tokens_used / usage.tokens_limit > 0.9
+                                                ? "bg-rose-400"
+                                                : usage.tokens_used / usage.tokens_limit > 0.7
+                                                ? "bg-amber-400"
+                                                : "bg-emerald-400"
+                                        }`}
+                                        style={{ width: `${Math.min(100, (usage.tokens_used / usage.tokens_limit) * 100)}%` }}
+                                    />
+                                </div>
+                            </div>
+                        )}
                         {/* Language toggle row */}
                         {!sidebarCollapsed && (
                             <button
@@ -453,6 +489,13 @@ function AppLayout() {
 
                         {userMenuOpen && (
                             <div className="absolute bottom-full start-2 end-2 mb-2 overflow-hidden rounded-lg border border-[var(--color-line)] bg-[var(--color-surface-2)] shadow-2xl">
+                                <button
+                                    onClick={() => { setUserMenuOpen(false); setBillingOpen(true) }}
+                                    className="flex w-full items-center gap-2 px-3 py-2 text-start text-sm text-[var(--color-fg)] hover:bg-[var(--color-surface-3)]"
+                                >
+                                    <BillingIcon /> {ta.planBilling}
+                                </button>
+                                <div className="h-px bg-[var(--color-line)]" />
                                 <button
                                     onClick={handleLogout}
                                     className="flex w-full items-center gap-2 px-3 py-2 text-start text-sm text-[var(--color-fg)] hover:bg-[var(--color-surface-3)]"
@@ -660,6 +703,138 @@ function GlobeIcon() {
             <circle cx="12" cy="12" r="10" />
             <line x1="2" y1="12" x2="22" y2="12" />
             <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+        </svg>
+    )
+}
+
+function formatTokens(n) {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+    if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`
+    return String(n)
+}
+
+const PLANS = [
+    {
+        id: 'free',
+        name: 'Free',
+        price: '$0',
+        period: '/forever',
+        tokens: '200K tokens / month',
+        features: ['Glyph (auto) managed model', 'Unlimited chats & workspaces', 'Invite teammates & LLMs'],
+    },
+    {
+        id: 'pro',
+        name: 'Pro',
+        price: '$12',
+        period: '/month',
+        tokens: '3M tokens / month',
+        features: ['All models — GPT-4o, Claude, Gemini', 'Email invitations & per-member permissions'],
+    },
+    {
+        id: 'max',
+        name: 'Max',
+        price: '$35',
+        period: '/month',
+        tokens: '15M tokens / month',
+        features: ['Higher rate limits', 'Early access to new models'],
+    },
+]
+
+function BillingModal({ currentPlan, onClose }) {
+    function handleUpgrade(planId) {
+        if (planId === currentPlan) return
+        // TODO: replace with Noon Payment checkout redirect
+        window.location.href = `mailto:hello@glypho.live?subject=Upgrade to ${planId} plan`
+    }
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <div className="w-full max-w-2xl rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-1)] shadow-2xl">
+                {/* Header */}
+                <div className="flex items-center justify-between border-b border-[var(--color-line-soft)] px-6 py-4">
+                    <div>
+                        <p className="text-base font-semibold text-[var(--color-fg)]">Plan & Billing</p>
+                        <p className="text-xs text-[var(--color-fg-muted)] mt-0.5">
+                            You're on the <span className="capitalize font-medium text-[var(--color-fg)]">{currentPlan}</span> plan
+                        </p>
+                    </div>
+                    <button
+                        onClick={onClose}
+                        className="rounded-lg p-1.5 text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-fg)]"
+                    >
+                        <CloseIcon size={16} />
+                    </button>
+                </div>
+
+                {/* Plan cards */}
+                <div className="grid grid-cols-3 gap-4 p-6">
+                    {PLANS.map(plan => {
+                        const isCurrent = plan.id === currentPlan
+                        const isDowngrade = PLANS.findIndex(p => p.id === plan.id) < PLANS.findIndex(p => p.id === currentPlan)
+                        return (
+                            <div
+                                key={plan.id}
+                                className={`flex flex-col rounded-xl border p-4 ${
+                                    isCurrent
+                                        ? 'border-emerald-400/50 bg-emerald-400/5'
+                                        : 'border-[var(--color-line)] bg-[var(--color-surface-2)]'
+                                }`}
+                            >
+                                <div className="flex items-center justify-between">
+                                    <span className="text-sm font-semibold text-[var(--color-fg)]">{plan.name}</span>
+                                    {isCurrent && (
+                                        <span className="rounded-full bg-emerald-400/15 px-2 py-0.5 text-[10px] font-medium text-emerald-400">
+                                            Current
+                                        </span>
+                                    )}
+                                </div>
+                                <div className="mt-3 flex items-baseline gap-1">
+                                    <span className="text-2xl font-semibold text-[var(--color-fg)]">{plan.price}</span>
+                                    <span className="text-xs text-[var(--color-fg-subtle)]">{plan.period}</span>
+                                </div>
+                                <p className="mt-2 text-xs font-medium text-emerald-400">{plan.tokens}</p>
+                                <ul className="mt-3 flex-1 space-y-1.5">
+                                    {plan.features.map((f, i) => (
+                                        <li key={i} className="flex items-start gap-1.5 text-xs text-[var(--color-fg-muted)]">
+                                            <span className="mt-0.5 text-emerald-400">✓</span>
+                                            <span>{f}</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                                <button
+                                    onClick={() => handleUpgrade(plan.id)}
+                                    disabled={isCurrent}
+                                    className={`mt-4 w-full rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
+                                        isCurrent
+                                            ? 'cursor-default bg-[var(--color-surface-3)] text-[var(--color-fg-subtle)]'
+                                            : isDowngrade
+                                            ? 'border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:border-[var(--color-fg-subtle)] hover:text-[var(--color-fg)]'
+                                            : 'bg-white text-black hover:bg-[var(--color-brand)]'
+                                    }`}
+                                >
+                                    {isCurrent ? 'Current plan' : isDowngrade ? 'Downgrade' : 'Upgrade'}
+                                </button>
+                            </div>
+                        )
+                    })}
+                </div>
+
+                <p className="border-t border-[var(--color-line-soft)] px-6 py-3 text-center text-xs text-[var(--color-fg-subtle)]">
+                    Payment integration coming soon. To upgrade now, email{' '}
+                    <a href="mailto:hello@glypho.live" className="text-[var(--color-fg-muted)] underline underline-offset-2">
+                        hello@glypho.live
+                    </a>
+                </p>
+            </div>
+        </div>
+    )
+}
+
+function BillingIcon() {
+    return (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="1" y="4" width="22" height="16" rx="2" ry="2" />
+            <line x1="1" y1="10" x2="23" y2="10" />
         </svg>
     )
 }

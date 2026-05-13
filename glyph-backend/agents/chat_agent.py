@@ -28,6 +28,7 @@ from langgraph.errors import GraphRecursionError
 from config import supabase
 from context import build_context_messages
 from tools import Delegation, ToolContext, get_tools, normalize_llm_name
+from usage import record_tokens
 
 
 # Hard cap on how many model+tool iterations the agent can run. Each
@@ -42,6 +43,7 @@ class AgentRunResult:
     message_id: str | None = None
     content: str = ""
     delegations: list[Delegation] = field(default_factory=list)
+    tokens_used: int = 0
 
 
 def _sse(payload: dict) -> str:
@@ -221,6 +223,11 @@ async def _run_agent_once(
                     yield _sse({"type": "token", "llm_id": llm_id, "content": content})
             elif kind == "on_tool_start":
                 yield _sse({"type": "tool", "llm_id": llm_id, "name": event.get("name", "")})
+            elif kind == "on_chat_model_end":
+                output = (event.get("data") or {}).get("output")
+                meta = getattr(output, "usage_metadata", None)
+                if meta:
+                    result.tokens_used += meta.get("total_tokens", 0)
             elif kind == "on_chain_end":
                 # The root graph emits its final state on its own on_chain_end.
                 # We can't always rely on the name, so capture the most recent
@@ -379,3 +386,15 @@ async def run_agent_stream(
                 yield event
         except asyncio.CancelledError:
             raise
+
+    # Tally tokens across all phases and persist to usage_tracking.
+    total_tokens = root_result.tokens_used
+    for dr in delegated_results:
+        total_tokens += dr.tokens_used
+    if delegated_results:
+        total_tokens += gather_result.tokens_used
+    if total_tokens > 0:
+        try:
+            record_tokens(user_id, total_tokens)
+        except Exception:
+            pass  # best-effort — never block the response over a usage write
