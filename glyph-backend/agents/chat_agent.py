@@ -32,7 +32,7 @@ from tools import Delegation, ToolContext, get_tools, normalize_llm_name
 # iteration is roughly model_call → tool_node → model_call, so a
 # recursion_limit of ~12 mirrors the legacy MAX_ITERATIONS=5 behavior with
 # a small safety margin.
-RECURSION_LIMIT = 12
+RECURSION_LIMIT = 50
 
 
 @dataclass
@@ -95,8 +95,9 @@ def _augment_system_prompt(
     """Append mention/delegation rules so @mentions are interpreted as routing."""
     normalized_self = normalize_llm_name(llm_name)
     others = ", ".join(f"@{name.title()}" for name in sorted(ctx.other_llms_by_name.keys()))
+    effective_base = base_prompt or "You are a helpful AI assistant."
+    separator = "\n\n---\n" if base_prompt else "\n"
     lines = [
-        "\n\n---",
         f"Your display name in this chat is @{llm_name}.",
         f"If a user message includes @{llm_name}, treat that as a direct address to you, not as an instruction to contact yourself.",
         "If you receive a message like `OtherModel: -> @You: task`, that is an internal delegated task for you. Do the task directly.",
@@ -126,7 +127,7 @@ def _augment_system_prompt(
         lines.append("This run was triggered by another model's handoff. The latest `-> @You:` handoff is your primary task; earlier user messages or mentions are background only. Do not delegate, hand off, or ask another model to do anything. Answer your assigned task directly as your final outcome.")
     if normalized_self in ctx.other_llms_by_name:
         lines.append("Never delegate to yourself.")
-    return (base_prompt or "") + "\n".join(lines)
+    return effective_base + separator + "\n".join(lines)
 
 
 def _extract_final_text(final_messages) -> str:
@@ -165,14 +166,18 @@ async def _run_agent_once(
         gather_mode=gather_mode,
     )
 
-    initial_messages = build_context_messages(
-        chat_id,
-        llm_id,
-        augmented_system_prompt,
-        up_to_message_id=replace_message_id,
-        include_message_id=side_message_id,
-        force_include_message_ids=force_include_message_ids,
-    )
+    try:
+        initial_messages = build_context_messages(
+            chat_id,
+            llm_id,
+            augmented_system_prompt,
+            up_to_message_id=replace_message_id,
+            include_message_id=side_message_id,
+            force_include_message_ids=force_include_message_ids,
+        )
+    except Exception as e:
+        yield _sse({"type": "error", "llm_id": llm_id, "detail": f"Failed to load context: {e}"})
+        return
 
     # Only the user-addressed root model can delegate. Delegated models answer
     # their task directly, which keeps one user turn to one visible reply per

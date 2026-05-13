@@ -124,7 +124,9 @@ def invite_llm(body: InviteLLMRequest, authorization: str = Header()):
             raise HTTPException(status_code=400, detail="target_llm_id does not belong to this chat")
 
     if conn_rows:
-        supabase.table("llm_connections").insert(conn_rows).execute()
+        conn_result = supabase.table("llm_connections").insert(conn_rows).execute()
+        if not conn_result.data:
+            raise HTTPException(status_code=500, detail="Failed to create LLM connections")
 
     join_text = generate_join_message(name)
     supabase.table("messages").insert({
