@@ -11,6 +11,6 @@ jobs:
           fetch-depth: 0
       - name: Push to Bitbucket
         run: |
-          git remote add bitbucket https://${{ secrets.BITBUCKET_USERNAME }}:${{ secrets.BITBUCKET_APP_PASSWORD }}@bitbucket.org/glypho/glyph.git
+          git remote add bitbucket https://x-token-auth:${{ secrets.BITBUCKET_APP_PASSWORD }}@bitbucket.org/glypho/glyph.git
           git push bitbucket --all
           git push bitbucket --tags
