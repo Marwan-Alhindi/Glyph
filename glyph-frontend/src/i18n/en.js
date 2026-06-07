@@ -160,6 +160,7 @@ export const en = {
         pitch: 'For power users and heavy workloads.',
         features: [
           'Unlimited teammates',
+          'Planner & Calendar',
         ],
         cta: 'Get started',
         action: 'signup',

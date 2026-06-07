@@ -18,6 +18,7 @@ import {
 } from "./Icons"
 import { API_BASE, apiFetch, apiUpload } from "../../services/supabase"
 import { useAuth } from "../../contexts/AuthContext"
+import { useUsage } from "../hooks/useUsage"
 import { getLLMColor, getLLMInitials, getPersonColor } from "../utils/llmColors"
 import { findMentions, isMentionPrefix } from "../utils/mentions"
 
@@ -225,11 +226,13 @@ function Chat({ chatId }) {
         }
         return { team: true, models: true, files: false, calendar: true, daily: true }
     })
+    const { user, session } = useAuth()
+    const usage = useUsage(user)
+    const canAccessPlanner = (usage?.plan || 'free') === 'max'
     const [viewGroup, setViewGroup] = useState(() => {
         const saved = localStorage.getItem("glyph.viewGroup")
         return saved === "planner" ? "planner" : "chat"
     })
-    const { user, session } = useAuth()
     const { selectedDate, setSelectedDate, notes, updateNote } = usePlannerNotes(chatId, user?.id)
 
     const teamScrollRef = useRef(null)
@@ -801,6 +804,12 @@ function Chat({ chatId }) {
     useEffect(() => {
         localStorage.setItem("glyph.openPanels", JSON.stringify(openPanels))
     }, [openPanels])
+
+    useEffect(() => {
+        if (usage && !canAccessPlanner && viewGroup === 'planner') {
+            setViewGroup('chat')
+        }
+    }, [canAccessPlanner, usage])
 
     useEffect(() => {
         localStorage.setItem("glyph.viewGroup", viewGroup)
@@ -1415,7 +1424,9 @@ function Chat({ chatId }) {
             <div className="flex items-center gap-2">
                 <div className="hidden items-center gap-0.5 rounded-lg border border-[var(--color-line)] p-0.5 md:flex">
                     <GroupBtn active={viewGroup === 'chat'} onClick={() => setViewGroup('chat')} icon={<ChatBubbleIcon />}>{tc.chatGroup}</GroupBtn>
-                    <GroupBtn active={viewGroup === 'planner'} onClick={() => setViewGroup('planner')} icon={<CalendarIcon />}>{tc.plannerGroup}</GroupBtn>
+                    {canAccessPlanner && (
+                        <GroupBtn active={viewGroup === 'planner'} onClick={() => setViewGroup('planner')} icon={<CalendarIcon />}>{tc.plannerGroup}</GroupBtn>
+                    )}
                 </div>
                 <div className="hidden items-center gap-0.5 rounded-lg border border-[var(--color-line)] p-0.5 md:flex">
                     {viewGroup === 'chat' ? (
@@ -2077,7 +2088,9 @@ function Chat({ chatId }) {
             <div className="flex items-center border-b border-[var(--color-line-soft)] bg-[var(--color-surface-1)] md:hidden">
                 <div className="flex items-center gap-0.5 rounded-lg border border-[var(--color-line)] p-0.5 m-2">
                     <GroupBtn active={viewGroup === 'chat'} onClick={() => setViewGroup('chat')} icon={<ChatBubbleIcon />}>{tc.chatGroup}</GroupBtn>
-                    <GroupBtn active={viewGroup === 'planner'} onClick={() => setViewGroup('planner')} icon={<CalendarIcon />}>{tc.plannerGroup}</GroupBtn>
+                    {canAccessPlanner && (
+                        <GroupBtn active={viewGroup === 'planner'} onClick={() => setViewGroup('planner')} icon={<CalendarIcon />}>{tc.plannerGroup}</GroupBtn>
+                    )}
                 </div>
                 <div className="flex flex-1">
                     {GROUP_KEYS[viewGroup].filter(k => openPanels[k]).map(k => (
