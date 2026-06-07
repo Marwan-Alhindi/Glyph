@@ -720,7 +720,7 @@ const PLANS = [
         price: '$0',
         period: '/forever',
         tokens: '200K tokens / month',
-        features: ['Glyph (auto) managed model', 'Unlimited chats & workspaces', 'Invite teammates & LLMs'],
+        features: ['3 chats', '1 teammate'],
     },
     {
         id: 'pro',
@@ -728,7 +728,7 @@ const PLANS = [
         price: '$12',
         period: '/month',
         tokens: '3M tokens / month',
-        features: ['All models — GPT-4o, Claude, Gemini', 'Email invitations & per-member permissions'],
+        features: ['Unlimited chats', '3 teammates'],
     },
     {
         id: 'max',
@@ -736,7 +736,7 @@ const PLANS = [
         price: '$35',
         period: '/month',
         tokens: '15M tokens / month',
-        features: ['Higher rate limits', 'Early access to new models'],
+        features: ['Unlimited teammates'],
     },
 ]
 

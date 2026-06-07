@@ -108,7 +108,6 @@ function Hero() {
                 colorDot="bg-emerald-400"
                 colorText="text-emerald-300"
                 name="Aria"
-                model="GPT-4o"
               >
                 {t.demo.hero.ariaIntro}
                 <ul className="mt-2 list-disc space-y-1 ps-5 text-[var(--color-fg-muted)]">
@@ -120,7 +119,6 @@ function Hero() {
                 colorDot="bg-violet-400"
                 colorText="text-violet-300"
                 name="Nova"
-                model="Claude"
               >
                 {t.demo.hero.novaMsg}
               </ModelCard>
@@ -199,7 +197,7 @@ function Bubble({ who, tone, children }) {
   )
 }
 
-function ModelCard({ name, model, colorRing, colorDot, colorText, children }) {
+function ModelCard({ name, colorRing, colorDot, colorText, children }) {
   return (
     <div className="rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-surface-2)] p-4">
       <div className="mb-2 flex items-center gap-2">
@@ -207,7 +205,6 @@ function ModelCard({ name, model, colorRing, colorDot, colorText, children }) {
           {name[0]}
         </span>
         <span className={`text-xs font-medium ${colorText}`}>{name}</span>
-        <span className="text-[10px] text-[var(--color-fg-subtle)]">· {model}</span>
         <span className={`ms-auto h-1.5 w-1.5 rounded-full ${colorDot}`} />
       </div>
       <div className="text-sm leading-relaxed text-[var(--color-fg)]">{children}</div>

@@ -283,9 +283,9 @@ function ModelsMini() {
         <>
             <div className="border-b border-[var(--color-line-soft)] px-4 py-2 text-[10px] font-semibold uppercase tracking-widest text-[var(--color-fg-subtle)]">{t.tryItDemo.panels.workspace}</div>
             <div className="flex-1 space-y-2.5 overflow-hidden p-4">
-                <ModelCard name="Aria" model="GPT-4o" tone="emerald">{demo.modelMsg1}</ModelCard>
-                <ModelCard name="Nova" model="Claude" tone="violet">{demo.modelMsg2}</ModelCard>
-                <ModelCard name="Atlas" model="Gemini" tone="sky">{demo.modelMsg3}</ModelCard>
+                <ModelCard name="Aria" tone="emerald">{demo.modelMsg1}</ModelCard>
+                <ModelCard name="Nova" tone="violet">{demo.modelMsg2}</ModelCard>
+                <ModelCard name="Atlas" tone="sky">{demo.modelMsg3}</ModelCard>
             </div>
         </>
     )
@@ -430,7 +430,7 @@ function Bubble({ who, children, me }) {
     )
 }
 
-function ModelCard({ name, model, tone, children }) {
+function ModelCard({ name, tone, children }) {
     const colorMap = {
         emerald: { ring: 'ring-emerald-500/60', text: 'text-emerald-300', soft: 'bg-emerald-500/[0.07]', border: 'border-emerald-500/30' },
         violet: { ring: 'ring-violet-500/60', text: 'text-violet-300', soft: 'bg-violet-500/[0.07]', border: 'border-violet-500/30' },
@@ -444,7 +444,6 @@ function ModelCard({ name, model, tone, children }) {
                     {name[0]}
                 </span>
                 <span className={`text-[11px] font-medium ${c.text}`}>{name}</span>
-                <span className="text-[10px] text-[var(--color-fg-subtle)]">· {model}</span>
             </div>
             <div className="text-[12px] leading-relaxed text-[var(--color-fg)]">{children}</div>
         </div>

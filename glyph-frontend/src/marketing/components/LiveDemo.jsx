@@ -5,9 +5,9 @@ const CYCLE_MS = 7000
 const HOLD_MS = 3500
 
 const THREAD_TIMINGS = [
-    { startMs: 0,    typeMs: 800, llm: { name: "Aria",  model: "GPT-4o", color: { ring: "ring-emerald-500/60", dot: "bg-emerald-400", text: "text-emerald-300", soft: "bg-emerald-500/[0.07]", border: "border-emerald-500/30" }, thinkFromMs: 1100, artifactFromMs: 2900, artifact: 'design' } },
-    { startMs: 500,  typeMs: 800, llm: { name: "Nova",  model: "Claude", color: { ring: "ring-violet-500/60", dot: "bg-violet-400", text: "text-violet-300", soft: "bg-violet-500/[0.07]", border: "border-violet-500/30" }, thinkFromMs: 1600, artifactFromMs: 3600, artifact: 'code'   } },
-    { startMs: 1000, typeMs: 800, llm: { name: "Atlas", model: "Gemini", color: { ring: "ring-sky-500/60",    dot: "bg-sky-400",    text: "text-sky-300",    soft: "bg-sky-500/[0.07]",    border: "border-sky-500/30"    }, thinkFromMs: 2100, artifactFromMs: 4300, artifact: 'pdf'    } },
+    { startMs: 0,    typeMs: 800, llm: { name: "Aria",  color: { ring: "ring-emerald-500/60", dot: "bg-emerald-400", text: "text-emerald-300", soft: "bg-emerald-500/[0.07]", border: "border-emerald-500/30" }, thinkFromMs: 1100, artifactFromMs: 2900, artifact: 'design' } },
+    { startMs: 500,  typeMs: 800, llm: { name: "Nova",  color: { ring: "ring-violet-500/60", dot: "bg-violet-400", text: "text-violet-300", soft: "bg-violet-500/[0.07]", border: "border-violet-500/30" }, thinkFromMs: 1600, artifactFromMs: 3600, artifact: 'code'   } },
+    { startMs: 1000, typeMs: 800, llm: { name: "Atlas", color: { ring: "ring-sky-500/60",    dot: "bg-sky-400",    text: "text-sky-300",    soft: "bg-sky-500/[0.07]",    border: "border-sky-500/30"    }, thinkFromMs: 2100, artifactFromMs: 4300, artifact: 'pdf'    } },
 ]
 const FOLLOW_UP_TIMING = { mentionColor: "text-sky-300", startMs: 5100, typeMs: 1300 }
 
@@ -247,7 +247,6 @@ function ModelCard({ thread, elapsed, waitingLabel }) {
                     {llm.name[0]}
                 </span>
                 <span className={`text-xs font-medium ${llm.color.text}`}>{llm.name}</span>
-                <span className="text-[10px] text-[var(--color-fg-subtle)]">· {llm.model}</span>
                 <span
                     className={`ms-auto h-1.5 w-1.5 rounded-full ${llm.color.dot} ${isThinking ? 'animate-pulse' : ''} ${isWaiting ? 'opacity-30' : ''}`}
                 />

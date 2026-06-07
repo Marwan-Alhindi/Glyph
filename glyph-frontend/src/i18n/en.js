@@ -15,7 +15,7 @@ export const en = {
     headline2: 'Every model.',
     headline3: ' Your whole team.',
     subheading:
-      'Glyph brings GPT, Claude, Gemini and your teammates into the same room. Mention a model, share an idea, ship faster — all in one collaborative thread.',
+      'Glyph brings a powerful AI assistant and your teammates into the same room. Share an idea, ask anything, ship faster — all in one collaborative thread.',
     ctaPrimary: 'Start free',
     ctaSecondary: 'Log in',
     freeBadge: 'Free during beta · No credit card required',
@@ -27,9 +27,9 @@ export const en = {
       typeTip: '💬 Type @ to bring a model in',
     },
     features: {
-      f1title: 'Multiple models, one thread',
+      f1title: 'One AI, one thread',
       f1desc:
-        'Invite GPT, Claude, Gemini and more into the same chat. Each one has its own color, prompt, and connections.',
+        'Invite Glyph into your chat. Give it a name and it\'s ready — context-aware, collaborative, and connected.',
       f2title: 'Real teammates, real-time',
       f2desc:
         'Bring humans in with an invite code. Everyone sees the same conversation as it unfolds.',
@@ -122,7 +122,7 @@ export const en = {
     headline2: 'Real value.',
     subtitle: "Start free. Upgrade when your team is shipping together.",
     footnote:
-      'Prices in USD. All plans include real-time chat, multi-LLM threads, and shared context across humans and models.',
+      'Prices in USD. All plans include real-time chat, AI assistants, and shared context across your team.',
     mostPopular: 'Most popular',
     plans: [
       {
@@ -131,10 +131,8 @@ export const en = {
         period: '/forever',
         pitch: 'For solo work and trying Glyph out.',
         features: [
-          '200K tokens / month',
-          'Glyph (auto) managed model',
-          'Unlimited chats & workspaces',
-          'Invite teammates & LLMs',
+          '3 chats',
+          '1 teammate',
         ],
         cta: 'Start free',
         action: 'signup',
@@ -147,10 +145,8 @@ export const en = {
         period: '/month',
         pitch: 'For individuals who use AI every day.',
         features: [
-          'Everything in Free, plus:',
-          '3M tokens / month',
-          'All models — GPT-4o, Claude, Gemini',
-          'Email invitations & per-member permissions',
+          'Unlimited chats',
+          '3 teammates',
         ],
         cta: 'Get started',
         action: 'signup',
@@ -163,10 +159,7 @@ export const en = {
         period: '/month',
         pitch: 'For power users and heavy workloads.',
         features: [
-          'Everything in Pro, plus:',
-          '15M tokens / month',
-          'Higher rate limits',
-          'Early access to new models',
+          'Unlimited teammates',
         ],
         cta: 'Get started',
         action: 'signup',
@@ -403,28 +396,9 @@ export const en = {
   },
   inviteLLM: {
     title: 'Invite a model',
-    subtitle: 'Pick a Glyph specialist or a raw foundation model.',
-    specialists: 'Specialists',
-    foundationModels: 'Foundation Models',
-    glyphSpecialists: 'Glyph Specialists',
-    specialistHint: 'Curated model, tools, and behavior.',
-    foundationHint: 'General model choices, no specialist pairing.',
-    generalTools: 'General tools',
-    glyphManaged: 'Glyph managed',
+    subtitle: 'Give your assistant a name to get started.',
     displayName: 'Display name',
     inviteBtn: 'Invite model →',
     newModel: 'New model',
-    specialistsCatalog: {
-      glyph_researcher: { label: 'Researcher', desc: 'Finds sources, compares claims, and returns cited synthesis.', strengths: ['Web-first', 'Citations', 'Source comparison'] },
-      glyph_builder: { label: 'Builder', desc: 'Plans, writes, debugs, and reviews implementation work.', strengths: ['Code', 'Debugging', 'Tests'] },
-      glyph_designer: { label: 'Designer', desc: 'Critiques interfaces and shapes product flows and visual direction.', strengths: ['UI critique', 'Flows', 'Visual systems'] },
-      glyph_writer: { label: 'Writer', desc: 'Drafts, edits, restructures, and adapts tone for writing.', strengths: ['Drafting', 'Editing', 'Tone'] },
-    },
-    foundationCatalog: {
-      glyph: { label: 'Glyph (auto)', desc: 'Glyph chooses the best general setup available.' },
-      openai: { label: 'ChatGPT (GPT-4o)', desc: 'General-purpose GPT model with Glyph tools.' },
-      anthropic: { label: 'Claude (Sonnet 4.6)', desc: 'Anthropic\'s Claude — strong at reasoning and long context.' },
-      gemini: { label: 'Gemini 2.0 Flash', desc: 'Google\'s Gemini — fast, multimodal, and research-capable.' },
-    },
   },
 }
