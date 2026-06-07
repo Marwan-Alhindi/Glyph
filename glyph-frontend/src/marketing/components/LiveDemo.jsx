@@ -109,7 +109,7 @@ function LiveDemo() {
                             <span className="h-2.5 w-2.5 rounded-full bg-emerald-400/70" />
                         </div>
                         <div className="flex items-center gap-2 text-xs text-[var(--color-fg-subtle)]">
-                            <span className="font-medium text-[var(--color-fg-muted)]">launch-plan</span>
+                            <span className="font-medium text-[var(--color-fg-muted)]">research-hub</span>
                             <span>{ld.windowSubtitle}</span>
                         </div>
                         <div className="w-12" />
@@ -284,28 +284,37 @@ function Artifact({ kind }) {
 function DesignArtifact() {
     return (
         <div className="ld-fade-in rounded-lg border border-emerald-500/20 bg-[var(--color-surface-2)] p-3">
-            <div className="text-[10px] uppercase tracking-widest text-emerald-300/80">Hero · v1</div>
-            <div className="mt-2 rounded-md bg-gradient-to-br from-emerald-400/40 via-sky-400/30 to-violet-400/40 p-4 text-center">
-                <p className="text-[10px] text-white/70">Headline</p>
-                <p className="text-sm font-semibold text-white">One chat. Every model.</p>
-                <button className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-[11px] font-medium text-black">
-                    Start free →
-                </button>
-            </div>
-            <p className="mt-2 text-[10px] text-[var(--color-fg-subtle)]">Emerald · Sky · Violet · Dark canvas</p>
+            <div className="text-[10px] uppercase tracking-widest text-emerald-300/80">Chapter 5 · Key Concepts</div>
+            <ul className="mt-2 space-y-1.5">
+                {[
+                    'Abstraction hides complexity behind clean interfaces.',
+                    'Encapsulation groups data with the logic that uses it.',
+                    'Polymorphism lets different types share the same interface.',
+                ].map((line, i) => (
+                    <li key={i} className="flex items-start gap-2 text-[11px] text-[var(--color-fg-muted)]">
+                        <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400/70" />
+                        {line}
+                    </li>
+                ))}
+            </ul>
         </div>
     )
 }
 
 function CodeArtifact() {
     return (
-        <pre className="ld-fade-in overflow-hidden rounded-lg border border-violet-500/20 bg-[#0c0c10] p-3 text-[11px] leading-relaxed text-violet-200">
-{`@keyframes pulse {
-  0%   { box-shadow: 0 0 0 0 rgba(16,185,129,.6); }
-  100% { box-shadow: 0 0 0 12px rgba(16,185,129,0); }
-}
-.btn:hover { animation: pulse 1.4s infinite; }`}
-        </pre>
+        <div className="ld-fade-in rounded-lg border border-violet-500/20 bg-[var(--color-surface-2)] p-3 space-y-2">
+            <div className="text-[10px] uppercase tracking-widest text-violet-300/80">2 gaps found</div>
+            {[
+                { label: 'Correlation ≠ causation', note: 'Section 3 implies causality without supporting evidence.' },
+                { label: 'Sample size', note: 'n=42 limits generalisability to broader populations.' },
+            ].map((gap, i) => (
+                <div key={i} className="rounded-md border border-violet-500/15 bg-violet-500/[0.05] px-2.5 py-1.5">
+                    <p className="text-[11px] font-medium text-violet-200">{gap.label}</p>
+                    <p className="text-[10px] text-[var(--color-fg-subtle)]">{gap.note}</p>
+                </div>
+            ))}
+        </div>
     )
 }
 
@@ -316,8 +325,8 @@ function PdfArtifact() {
                 <PdfIcon />
             </span>
             <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-medium text-[var(--color-fg)]">launch-plan.pdf</div>
-                <div className="text-[10px] text-[var(--color-fg-subtle)]">3 pages · 142 KB</div>
+                <div className="truncate text-sm font-medium text-[var(--color-fg)]">study-summary.pdf</div>
+                <div className="text-[10px] text-[var(--color-fg-subtle)]">4 pages · 98 KB</div>
             </div>
             <button className="rounded-full border border-sky-500/30 bg-sky-500/10 px-3 py-1 text-[11px] font-medium text-sky-300">
                 Download →

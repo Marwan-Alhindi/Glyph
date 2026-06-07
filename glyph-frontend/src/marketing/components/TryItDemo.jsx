@@ -5,7 +5,7 @@ const GROUP_KEYS = {
     chat: ['team', 'models', 'files'],
     planner: ['calendar', 'daily'],
 }
-const GROUP_TITLES = { chat: 'launch-plan', planner: 'this-week-plan' }
+const GROUP_TITLES = { chat: 'research-hub', planner: 'this-week-plan' }
 
 function TryItDemo() {
     const sectionRef = useRef(null)
@@ -297,9 +297,9 @@ function FilesMini() {
         <>
             <div className="border-b border-[var(--color-line-soft)] px-4 py-2 text-[10px] font-semibold uppercase tracking-widest text-[var(--color-fg-subtle)]">{t.tryItDemo.panels.files}</div>
             <div className="flex-1 space-y-2 overflow-hidden p-4">
-                <FileRow name="launch-plan.pdf" ext="pdf" />
-                <FileRow name="hero-mock-v1.png" ext="png" />
-                <FileRow name="pricing-tiers.csv" ext="csv" />
+                <FileRow name="study-summary.pdf" ext="pdf" />
+                <FileRow name="concept-map.png" ext="png" />
+                <FileRow name="reading-list.csv" ext="csv" />
             </div>
         </>
     )
