@@ -1,7 +1,7 @@
-"""Plan limits, budget gating, rate limiting, and token usage recording.
+"""Plan limits, rate limiting, and token usage — business logic layer.
 
-Called by main.py before /askLLM runs (check_and_gate) and by chat_agent.py
-after each run completes (record_tokens).
+check_and_gate() is called before /askLLM to enforce rate and budget limits.
+record_tokens() is called after each agent run to persist token consumption.
 """
 
 import time
@@ -10,67 +10,37 @@ from datetime import date
 
 from fastapi import HTTPException
 
-from config import supabase
-
+from database.usage import UsageRepository
 
 PLAN_LIMITS: dict[str, dict] = {
-    "free": {"monthly_tokens": 200_000,    "requests_per_hour": 10},
-    "pro":  {"monthly_tokens": 3_000_000,  "requests_per_hour": 60},
-    "max":  {"monthly_tokens": 15_000_000, "requests_per_hour": 120},
+    "free": {"monthly_tokens": 200_000,    "requests_per_hour": 10,  "max_chats": 3,    "max_teammates": 1},
+    "pro":  {"monthly_tokens": 3_000_000,  "requests_per_hour": 60,  "max_chats": None, "max_teammates": 3},
+    "max":  {"monthly_tokens": 15_000_000, "requests_per_hour": 120, "max_chats": None, "max_teammates": None},
 }
+
+
+def get_plan_limits(user_id: str) -> dict:
+    plan = UsageRepository().get_plan(user_id)
+    return {**PLAN_LIMITS.get(plan, PLAN_LIMITS[_DEFAULT_PLAN]), "plan": plan}
 
 _DEFAULT_PLAN = "free"
 
-# In-memory rate store: user_id -> deque of unix timestamps (last hour only)
+# In-memory per-process rate store. Under multiple workers each process has
+# its own counter — acceptable for soft rate limiting at this scale.
 _rate_store: dict[str, deque] = {}
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-def _get_plan(user_id: str) -> str:
-    result = (
-        supabase.table("profiles")
-        .select("plan")
-        .eq("id", user_id)
-        .single()
-        .execute()
-    )
-    return (result.data or {}).get("plan") or _DEFAULT_PLAN
-
-
-def _period_start() -> date:
+def _period_start() -> str:
     today = date.today()
-    return date(today.year, today.month, 1)
+    return date(today.year, today.month, 1).isoformat()
 
-
-def _tokens_used_this_month(user_id: str) -> int:
-    result = (
-        supabase.table("usage_tracking")
-        .select("tokens_used")
-        .eq("user_id", user_id)
-        .eq("period_start", _period_start().isoformat())
-        .execute()
-    )
-    rows = result.data or []
-    return rows[0]["tokens_used"] if rows else 0
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
 
 def check_and_gate(user_id: str) -> None:
-    """Raise 429 if the user is over their rate or monthly token limit.
-
-    Fetches plan once and checks both limits in a single call so /askLLM
-    only pays one profile lookup.
-    """
-    plan = _get_plan(user_id)
+    """Raise 429 if the user is over their rate or monthly token limit."""
+    repo = UsageRepository()
+    plan = repo.get_plan(user_id)
     limits = PLAN_LIMITS.get(plan, PLAN_LIMITS[_DEFAULT_PLAN])
 
-    # --- Rate limit (in-memory, per hour) ---
     now = time.time()
     q = _rate_store.setdefault(user_id, deque())
     while q and q[0] < now - 3600:
@@ -85,8 +55,7 @@ def check_and_gate(user_id: str) -> None:
         )
     q.append(now)
 
-    # --- Monthly budget ---
-    used = _tokens_used_this_month(user_id)
+    used = repo.get_tokens_used(user_id, _period_start())
     if used >= limits["monthly_tokens"]:
         raise HTTPException(
             status_code=429,
@@ -99,20 +68,16 @@ def check_and_gate(user_id: str) -> None:
 
 
 def record_tokens(user_id: str, tokens: int) -> None:
-    """Atomically add `tokens` to the current month's usage row."""
     if tokens <= 0:
         return
-    supabase.rpc(
-        "increment_usage",
-        {"p_user_id": user_id, "p_period": _period_start().isoformat(), "p_tokens": tokens},
-    ).execute()
+    UsageRepository().increment_tokens(user_id, _period_start(), tokens)
 
 
 def get_usage_summary(user_id: str) -> dict:
-    """Return plan + usage data for the current billing period."""
-    plan = _get_plan(user_id)
+    repo = UsageRepository()
+    plan = repo.get_plan(user_id)
     limits = PLAN_LIMITS.get(plan, PLAN_LIMITS[_DEFAULT_PLAN])
-    used = _tokens_used_this_month(user_id)
+    used = repo.get_tokens_used(user_id, _period_start())
 
     now = time.time()
     q = _rate_store.get(user_id, deque())

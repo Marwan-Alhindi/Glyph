@@ -1,61 +1,49 @@
-"""FastAPI bootstrap: app instance, middleware, static mounts, route handlers.
+"""FastAPI application — middleware, router registration."""
 
-Domain logic lives elsewhere:
-- config.py     — env, OpenAI/Supabase/JWKS clients, LangSmith setup
-- auth.py       — JWT + chat membership
-- schemas.py    — pydantic request/response models for /askLLM
-- context.py    — chat history → messages with llm_connections filtering
-- tools.py      — agent tools (web_search, create_pdf)
-- agents/       — chat_agent, join_agent
-- chats         — chat lifecycle (create/rename/pin/leave)
-- messages      — message CRUD (insert/edit/delete/include_in_context)
-- participants  — invite LLMs + participants manifest
-- invitations   — email invite flow
-"""
-
-import os
-
-from fastapi import FastAPI
+from fastapi import FastAPI, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
-from fastapi.staticfiles import StaticFiles
 
-from config import CHARTS_DIR, FILES_DIR, PDFS_DIR, setup_tracing
-from auth import get_current_user, verify_participant
-from schemas import AskLLMRequest
-from agents.chat_agent import run_agent_stream
-from usage import check_and_gate, get_usage_summary
-from chats import router as chats_router
-from messages import router as messages_router
-from participants import router as participants_router
-from invitations import router as invitations_router
-from uploads import router as uploads_router
-from integrations.router import router as integrations_router
+from auth import get_current_user
+from settings import get_settings
+from usage import get_usage_summary
 
-from fastapi import Header
+from api.ask_llm import router as ask_llm_router
+from api.chats import router as chats_router
+from api.messages import router as messages_router
+from api.participants import router as participants_router
+from api.invitations import router as invitations_router
+from api.uploads import router as uploads_router
+from api.integrations.router import router as integrations_router
 
 
-setup_tracing()
+def _setup_tracing() -> None:
+    import os
+    s = get_settings()
+    if s.langsmith_tracing.lower() == "true" and s.langsmith_api_key:
+        os.environ["LANGCHAIN_TRACING_V2"] = "true"
+        os.environ["LANGCHAIN_API_KEY"] = s.langsmith_api_key
+        os.environ["LANGCHAIN_PROJECT"] = s.langsmith_project
+        print(f"[langsmith] tracing on, project={s.langsmith_project}")
+    else:
+        os.environ.pop("LANGCHAIN_TRACING_V2", None)
+        print("[langsmith] tracing off")
+
+
+_setup_tracing()
 
 app = FastAPI()
 
-origins = os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=get_settings().cors_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.mount("/pdfs", StaticFiles(directory=PDFS_DIR), name="pdfs")
-app.mount("/charts", StaticFiles(directory=CHARTS_DIR), name="charts")
-app.mount("/files", StaticFiles(directory=FILES_DIR), name="files")
-
-
 @app.get("/")
 def read_root():
-    return {"message": "Welcome to Langpulse backend"}
+    return {"message": "Welcome to Glyph backend"}
 
 
 @app.get("/usage")
@@ -64,28 +52,7 @@ def usage_summary(authorization: str = Header()):
     return get_usage_summary(user_id)
 
 
-@app.post("/askLLM")
-def ask_llm(body: AskLLMRequest, authorization: str = Header()):
-    user_id = get_current_user(authorization)
-    verify_participant(user_id, body.chat_id)
-    check_and_gate(user_id)
-    return StreamingResponse(
-        run_agent_stream(
-            body.chat_id,
-            body.llm_id,
-            user_id,
-            replace_message_id=body.replace_message_id,
-            side_message_id=body.side_message_id,
-        ),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-            "Connection": "keep-alive",
-        },
-    )
-
-
+app.include_router(ask_llm_router)
 app.include_router(chats_router)
 app.include_router(messages_router)
 app.include_router(participants_router)

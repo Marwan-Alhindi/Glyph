@@ -1,6 +1,5 @@
-"""Agent implementations: chat, planner, join.
+"""Agent implementations: chat (streaming), planner (one-shot), join (one-shot).
 
-Phase 1: each module wraps the existing raw-OpenAI logic. Subsequent phases
-swap the implementation to LangChain primitives without changing the
-public surface (run_agent_stream, run_planner, generate_join_message).
+All agents live in agent.py. Public surface:
+  run_agent_stream, run_planner, generate_join_message
 """
