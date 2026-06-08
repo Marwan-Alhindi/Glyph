@@ -15,6 +15,7 @@ from agents.tools.stateless.create_pdf import create_pdf
 from agents.tools.contextual.python_repl import make_python_repl_tool
 from agents.tools.contextual.query_chat import make_query_tool
 from agents.tools.contextual.memory import make_memory_tools
+from agents.tools.contextual.delegate import make_delegate_tool
 
 _STATELESS = [web_search, read_url, execute_code, read_file, create_chart, write_file, create_pdf]
 
@@ -25,4 +26,5 @@ def get_tools(ctx: ToolContext | None = None) -> list:
         tools.append(make_python_repl_tool(ctx))
         tools.append(make_query_tool(ctx))
         tools.extend(make_memory_tools(ctx))
+        tools.append(make_delegate_tool(ctx))
     return tools

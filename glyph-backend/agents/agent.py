@@ -29,9 +29,14 @@ from api.schemas import PlannerResponse
 from database.daily_notes import DailyNotesRepository
 from database.llms import LLMRepository
 from database.messages import MessageRepository
-from usage import record_tokens
+from usage import check_and_gate, record_tokens
 
 RECURSION_LIMIT = 50
+
+# How many automatic LLM→LLM delegation hops to allow per human message.
+# 1 = the directly-asked LLM may hand off once; that delegate cannot delegate
+# further. Bounds runaway loops and token spend.
+MAX_DELEGATION_HOPS = 1
 
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
@@ -101,13 +106,25 @@ def _build_graph(model, tools):
 
 # ── System prompt ─────────────────────────────────────────────────────────────
 
-def _build_system_prompt(base_prompt: str, llm_name: str) -> str:
+def _build_system_prompt(
+    base_prompt: str,
+    llm_name: str,
+    other_llm_names: list[str] | None = None,
+) -> str:
     effective_base = base_prompt or "You are a helpful AI assistant."
     separator = "\n\n---\n" if base_prompt else "\n"
     lines = [
         f"Your display name in this chat is @{llm_name}.",
         f"If a user message starts with @{llm_name}, it is addressed directly to you.",
     ]
+    if other_llm_names:
+        names = ", ".join(f"@{n}" for n in other_llm_names)
+        lines.append(
+            f"Other AI teammates in this chat: {names}. When the right next step "
+            "is for one of them to act on your output, use the `delegate` tool to "
+            "hand the task to them by name. Simply mentioning their name in your "
+            "reply text does NOT reach them — only the delegate tool does."
+        )
     return effective_base + separator + "\n".join(lines)
 
 
@@ -135,23 +152,38 @@ async def run_agent_stream(
     user_id: str,
     replace_message_id: str | None = None,
     side_message_id: str | None = None,
+    force_include_message_ids: set[str] | None = None,
+    _depth: int = 0,
 ):
-    """Async generator — yields SSE events as the LangGraph agent runs."""
+    """Async generator — yields SSE events as the LangGraph agent runs.
+
+    force_include_message_ids: message ids to make visible to this LLM even if
+        its connection filter would hide them (used to deliver a delegation task).
+    _depth: how many delegation hops deep this run is (0 = directly asked by a
+        human). Internal — set automatically when chaining delegations.
+    """
     llm = LLMRepository().get_by_id(llm_id)
     if not llm:
         yield _sse({"type": "error", "llm_id": llm_id, "detail": "LLM not found"})
         return
 
     llm_name = llm.get("display_name") or "LLM"
-    system_prompt = _build_system_prompt(llm.get("model_instruct") or "", llm_name)
+
+    other_llms = [
+        r for r in LLMRepository().list_by_chat(chat_id, exclude_id=llm_id)
+        if r.get("display_name")
+    ]
+    system_prompt = _build_system_prompt(
+        llm.get("model_instruct") or "",
+        llm_name,
+        [r["display_name"] for r in other_llms],
+    )
 
     tool_ctx = ToolContext(
         chat_id=chat_id,
         sender_llm_id=llm_id,
         other_llms_by_name={
-            _normalize_llm_name(r.get("display_name") or ""): r["id"]
-            for r in LLMRepository().list_by_chat(chat_id, exclude_id=llm_id)
-            if r.get("display_name")
+            _normalize_llm_name(r["display_name"]): r["id"] for r in other_llms
         },
     )
 
@@ -162,6 +194,7 @@ async def run_agent_stream(
             system_prompt,
             up_to_message_id=replace_message_id,
             include_message_id=side_message_id,
+            force_include_message_ids=force_include_message_ids,
             cache_system_prompt=is_claude(llm.get("model_type")),
         )
     except Exception as e:
@@ -256,6 +289,51 @@ async def run_agent_stream(
             record_tokens(user_id, tokens_used)
         except Exception:
             pass
+
+    # ── LLM→LLM delegation chaining ───────────────────────────────────────────
+    # If this agent used the delegate tool, run each target now, streaming its
+    # reply into the same SSE response. Bounded by MAX_DELEGATION_HOPS so a
+    # delegate cannot keep handing off forever. Only fresh replies chain —
+    # regenerations and side-asks do not.
+    if (
+        replace_message_id is None
+        and side_message_id is None
+        and _depth < MAX_DELEGATION_HOPS
+        and tool_ctx.delegations
+    ):
+        seen_targets: set[str] = set()
+        for d in tool_ctx.delegations:
+            if d.target_llm_id in seen_targets:
+                continue
+            seen_targets.add(d.target_llm_id)
+
+            # Gate each hop against the user's plan. If over budget, surface it
+            # and stop the chain rather than crashing the stream.
+            try:
+                check_and_gate(user_id)
+            except HTTPException as e:
+                yield _sse({
+                    "type": "error",
+                    "llm_id": d.target_llm_id,
+                    "detail": getattr(e, "detail", "Usage limit reached"),
+                })
+                break
+
+            yield _sse({
+                "type": "agent_start",
+                "llm_id": d.target_llm_id,
+                "from_llm_id": llm_id,
+                "delegation_message_id": d.message_id,
+            })
+
+            async for event in run_agent_stream(
+                chat_id,
+                d.target_llm_id,
+                user_id,
+                force_include_message_ids={d.message_id} if d.message_id else None,
+                _depth=_depth + 1,
+            ):
+                yield event
 
 
 # ── Planner agent (one-shot, structured output) ───────────────────────────────
