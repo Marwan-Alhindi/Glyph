@@ -62,6 +62,9 @@ A ReAct loop with a nested RAG subgraph:
 - Routing after `agent`: a `retrieve_documents` tool call → `retrieve`; any other tool call → `tools`; no tool call → END. `tools → agent`, `retrieve → agent`.
 - `AgentState` carries `messages` (+ `operator.add`) and `chat_id` (shared with the retrieve subgraph). `agents/graph.py` exposes a module-level compiled graph for LangGraph Studio.
 
+### File uploads (KAN-7)
+Files upload **directly to Supabase Storage**, not through the backend body. The frontend `apiUpload` (`src/services/supabase.js`) calls `POST /uploads/sign` for a signed upload token, then `uploadToSignedUrl` puts the bytes straight in the `chat-uploads` bucket, and sends only the public URL to `/messages`. This avoids proxy/body-size 413s on large files. Hard ceiling is the Supabase bucket/plan file-size limit (50 MB free); keep `MAX_SIGNED_SIZE` (backend) and `MAX_UPLOAD_BYTES` (frontend) aligned with it. Legacy `POST /uploads` (through-backend) remains as a fallback.
+
 ### RAG retrieval (KAN-6) — `agents/rag/`
 Corpus = uploaded files. On message-create, `api/messages.py` enqueues a `BackgroundTasks` ingest (`agents/rag/ingest.py`): extract (`read_file.extract_text`) → token-aware chunk (`chunking.py`, tiktoken) → batch-embed (`text-embedding-3-small`) → upsert into the `documents` pgvector table (dedupe on `content_hash` = record manager). Retrieval is a **nested subgraph** (`agents/rag/retrieval_graph.py`): `router → ⇉ {one node per RAG method} → fuse` (Reciprocal Rank Fusion). Methods live in `agents/rag/methods.py` (`NODE_FUNCS`, gated by `ENABLED_METHODS`). The agent enters it via the `retrieve_documents` tool, which is bound to the model but **excluded from `ToolNode`** — its execution is the subgraph node, so LangSmith/Studio render one nested graph. Vector search uses the `match_documents` RPC (mirrors `match_memories`).
 
