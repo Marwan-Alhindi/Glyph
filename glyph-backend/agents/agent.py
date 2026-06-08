@@ -51,31 +51,46 @@ def _normalize_llm_name(value: str) -> str:
 
 # ── LangGraph state ───────────────────────────────────────────────────────────
 
-class AgentState(TypedDict):
+class AgentState(TypedDict, total=False):
     # Annotated with operator.add so each node's returned messages are
     # appended to the list rather than replacing it.
     messages: Annotated[list[BaseMessage], operator.add]
+    # chat_id is shared with the retrieval subgraph node so it can scope
+    # match_documents to this chat. Set in the initial state in run_agent_stream.
+    chat_id: str
 
 
 # ── Graph builder ─────────────────────────────────────────────────────────────
 
 def _build_graph(model, tools):
-    """Build and compile the ReAct tool-calling graph.
+    """Build and compile the ReAct tool-calling graph with a nested RAG node.
 
     Nodes
     -----
-    agent  — calls the LLM with the full message history
-    tools  — executes every tool call the LLM requested (via ToolNode)
+    agent     — calls the LLM with the full message history
+    tools     — executes every tool call the LLM requested (via ToolNode)
+    retrieve  — the RAG retrieval SUBGRAPH (router → method nodes → fuse),
+                added as a compiled-graph node so it renders nested in one graph
 
     Edges
     -----
-    START  → agent
-    agent  → tools   (conditional: last message has tool_calls)
-    agent  → END     (conditional: last message is a plain reply)
-    tools  → agent   (unconditional: always loop back after tools run)
+    START     → agent
+    agent     → retrieve  (conditional: last message calls `retrieve_documents`)
+    agent     → tools     (conditional: last message has other tool_calls)
+    agent     → END       (conditional: last message is a plain reply)
+    tools     → agent
+    retrieve  → agent
+
+    `retrieve_documents` is bound to the model (so the agent can request
+    retrieval) but EXCLUDED from ToolNode — its execution is the retrieve
+    subgraph node, which reads the tool call's `question` arg from the message
+    history and appends a ToolMessage with the grounded result.
     """
-    bound_model = model.bind_tools(tools)
-    tool_node = ToolNode(tools)
+    from agents.rag.retrieve_tool import retrieve_documents
+    from agents.rag.retrieval_graph import RETRIEVAL_GRAPH
+
+    bound_model = model.bind_tools(list(tools) + [retrieve_documents])
+    tool_node = ToolNode(tools)  # retrieve_documents intentionally excluded
 
     def call_model(state: AgentState) -> dict:
         response = bound_model.invoke(state["messages"])
@@ -84,6 +99,9 @@ def _build_graph(model, tools):
     def route_after_agent(state: AgentState) -> str:
         last = state["messages"][-1]
         if isinstance(last, AIMessage) and getattr(last, "tool_calls", None):
+            names = [tc.get("name") for tc in last.tool_calls]
+            if "retrieve_documents" in names:
+                return "retrieve"
             return "tools"
         return END
 
@@ -91,15 +109,17 @@ def _build_graph(model, tools):
 
     graph.add_node("agent", call_model)
     graph.add_node("tools", tool_node)
+    graph.add_node("retrieve", RETRIEVAL_GRAPH)
 
     graph.set_entry_point("agent")
 
     graph.add_conditional_edges(
         "agent",
         route_after_agent,
-        {"tools": "tools", END: END},
+        {"tools": "tools", "retrieve": "retrieve", END: END},
     )
     graph.add_edge("tools", "agent")
+    graph.add_edge("retrieve", "agent")
 
     return graph.compile()
 
@@ -211,7 +231,7 @@ async def run_agent_stream(
     run_name = f"{chat_id[:8]}_{llm_name}"
     try:
         async for event in graph.astream_events(
-            {"messages": initial_messages},
+            {"messages": initial_messages, "chat_id": chat_id},
             version="v2",
             config={
                 "recursion_limit": RECURSION_LIMIT,
