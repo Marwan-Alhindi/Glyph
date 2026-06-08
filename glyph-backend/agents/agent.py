@@ -13,7 +13,7 @@ import re
 from typing import Annotated, TypedDict
 
 from fastapi import HTTPException
-from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.errors import GraphRecursionError
@@ -96,6 +96,32 @@ def _build_graph(model, tools):
         response = bound_model.invoke(state["messages"])
         return {"messages": [response]}
 
+    def retrieve_node(state: AgentState) -> dict:
+        """Wrapper that runs the RAG subgraph and returns ONLY the resulting
+        ToolMessage(s) — never the history — so the parent message list is not
+        duplicated. Satisfies every tool call in the triggering AI message."""
+        last = state["messages"][-1]
+        tool_calls = getattr(last, "tool_calls", None) or []
+        msgs: list[BaseMessage] = []
+        context = None
+        for tc in tool_calls:
+            if tc.get("name") == "retrieve_documents":
+                if context is None:
+                    question = (tc.get("args") or {}).get("question") or ""
+                    result = RETRIEVAL_GRAPH.invoke(
+                        {"question": question, "chat_id": state.get("chat_id")}
+                    )
+                    context = result.get("answer_context") or \
+                        "No relevant passages found in the uploaded files."
+                    msgs.append(ToolMessage(content=context, tool_call_id=tc["id"]))
+                else:
+                    msgs.append(ToolMessage(content="(see retrieval result above)", tool_call_id=tc["id"]))
+            else:
+                msgs.append(ToolMessage(
+                    content=f"(`{tc.get('name')}` was not run this turn — call it again on its own.)",
+                    tool_call_id=tc["id"]))
+        return {"messages": msgs}
+
     def route_after_agent(state: AgentState) -> str:
         last = state["messages"][-1]
         if isinstance(last, AIMessage) and getattr(last, "tool_calls", None):
@@ -109,7 +135,7 @@ def _build_graph(model, tools):
 
     graph.add_node("agent", call_model)
     graph.add_node("tools", tool_node)
-    graph.add_node("retrieve", RETRIEVAL_GRAPH)
+    graph.add_node("retrieve", retrieve_node)
 
     graph.set_entry_point("agent")
 
