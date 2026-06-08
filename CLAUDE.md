@@ -124,9 +124,12 @@ process after the implementation is complete and verified:
    fall back to adding it as a comment on the issue. Always confirm which issue
    key before posting.
 3. **Push the code** referencing the task: work on a branch named `<KEY>-<slug>`,
-   prefix the commit subject with the key (`KAN-5: ...`), and push to `origin`.
-   The key in the branch/commit is what links the work back to the Jira task.
-   Open a PR only when the user asks.
+   prefix the commit subject with the key (`KAN-5: ...`), and push the branch to
+   `origin`. The key in the branch/commit is what links the work back to the Jira
+   task. Open a PR only when the user asks.
+4. **Merge to `main`** (solo workflow — the user works alone): after pushing the
+   branch, fast-forward/merge `<KEY>-<slug>` into `main` and push `main` to
+   `origin`. Do this automatically as part of the task; no PR review needed.
 
 Notes:
 - Jira access is via the **Atlassian Remote MCP** server (set up once with
