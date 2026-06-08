@@ -47,3 +47,5 @@ matplotlib
 pdfplumber
 pillow
 python-multipart
+# RAG (KAN-6): token-aware chunking for document ingestion
+tiktoken

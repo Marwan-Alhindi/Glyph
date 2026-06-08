@@ -1,12 +1,13 @@
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from auth import get_current_user, verify_participant
 from database.messages import MessageRepository
 from api.schemas import AttachmentInfo
+from agents.rag.ingest import ingest_attachments
 
 router = APIRouter()
 
@@ -29,7 +30,11 @@ class IncludeInContextRequest(BaseModel):
 
 
 @router.post("/messages")
-def create_message(body: CreateMessageRequest, authorization: str = Header()):
+def create_message(
+    body: CreateMessageRequest,
+    background: BackgroundTasks,
+    authorization: str = Header(),
+):
     user_id = get_current_user(authorization)
     verify_participant(user_id, body.chat_id)
 
@@ -37,15 +42,22 @@ def create_message(body: CreateMessageRequest, authorization: str = Header()):
     if not content:
         raise HTTPException(status_code=400, detail="content cannot be empty")
 
+    attachments = [a.model_dump() for a in body.attachments]
     row = MessageRepository().create_user_message(
         chat_id=body.chat_id,
         sender_user_id=user_id,
         content=content,
         included_in_context=body.included_in_context,
-        attachments=[a.model_dump() for a in body.attachments],
+        attachments=attachments,
     )
     if not row:
         raise HTTPException(status_code=500, detail="Failed to insert message")
+
+    # RAG: chunk + embed any text/PDF/CSV/JSON attachments off the request path
+    # so the agent can retrieve over them. Images are skipped (handled by vision).
+    if attachments:
+        background.add_task(ingest_attachments, body.chat_id, attachments)
+
     return row
 
 
