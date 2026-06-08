@@ -19,7 +19,7 @@ uvicorn main:app --reload --port 8000
 
 There is no test runner configured in either service.
 
-Migrations are raw SQL files in `glyph-backend/migrations/` (numbered). Apply them in order against the Supabase project; there is no in-repo migration runner.
+Migrations are **not** in this repo. They live as numbered `## NNNN_name.sql` sections in the Dendron note `projects.glyph.backend.sql_migrations.md` (under `notes/dendron-notes/`). When a feature needs a schema change, append a new numbered section there (mirror the closest existing one — e.g. `0010_memories_pgvector.sql` for pgvector tables), and the user applies it manually in the Supabase SQL editor. There is no in-repo migration runner.
 
 ## Architecture
 
@@ -37,7 +37,7 @@ Important message flags that affect both UI and LLM context:
 - `side_parent_message_id` — links a side-ask thread to its parent.
 
 ### `llm_connections` is the visibility model (the key non-obvious piece)
-`glyph-backend/context.py` builds the message list each LLM is allowed to see. An invited LLM:
+`glyph-backend/agents/context_builder.py` (`build_context_messages`) builds the message list each LLM is allowed to see. An invited LLM:
 - Only sees user messages if it has a connection with `target_type='user'`.
 - Only sees other LLMs' messages if connected to those specific LLMs.
 - Always sees its own past messages (rendered as `AIMessage`).
@@ -46,14 +46,27 @@ Important message flags that affect both UI and LLM context:
 Any change to LLM-visible context flows through this module — do not bypass it from agent code.
 
 ### Streaming pattern (`/askLLM`)
-`agents/chat_agent.py` builds a LangGraph agent via `langchain.agents.create_agent` and bridges `astream_events(version="v2")` to the SSE wire format the frontend expects:
+`agents/agent.py` (`run_agent_stream`) builds a hand-rolled LangGraph (`_build_graph`) and bridges `astream_events(version="v2")` to the SSE wire format the frontend expects:
 ```
-{type: "token", content}
-{type: "tool", name}
-{type: "done", message_id, content}
-{type: "error", detail}
+{type: "token",       llm_id, content}
+{type: "tool",        llm_id, name}
+{type: "agent_start", llm_id, from_llm_id, delegation_message_id}   # a delegated LLM is starting
+{type: "done",        llm_id, message_id, content}
+{type: "error",       llm_id, detail}
 ```
-The final assistant message row is INSERTed into Supabase by `chat_agent.py` itself (not by the agent graph), so the realtime push to other participants fires at the moment the reply is complete. When `replace_message_id` is set, the agent regenerates that row in place: context is truncated to messages strictly before it, and the result is UPDATEd onto the existing row.
+The final assistant message row is INSERTed into Supabase by `agent.py` itself (not by the agent graph), so the realtime push to other participants fires at the moment the reply is complete. When `replace_message_id` is set, the agent regenerates that row in place: context is truncated to messages strictly before it, and the result is UPDATEd onto the existing row.
+
+### Agent graph shape (`agents/agent.py::_build_graph`)
+A ReAct loop with a nested RAG subgraph:
+- Nodes: `agent` (LLM with `bind_tools`), `tools` (`ToolNode`), `retrieve` (the compiled RAG subgraph — see below).
+- Routing after `agent`: a `retrieve_documents` tool call → `retrieve`; any other tool call → `tools`; no tool call → END. `tools → agent`, `retrieve → agent`.
+- `AgentState` carries `messages` (+ `operator.add`) and `chat_id` (shared with the retrieve subgraph). `agents/graph.py` exposes a module-level compiled graph for LangGraph Studio.
+
+### RAG retrieval (KAN-6) — `agents/rag/`
+Corpus = uploaded files. On message-create, `api/messages.py` enqueues a `BackgroundTasks` ingest (`agents/rag/ingest.py`): extract (`read_file.extract_text`) → token-aware chunk (`chunking.py`, tiktoken) → batch-embed (`text-embedding-3-small`) → upsert into the `documents` pgvector table (dedupe on `content_hash` = record manager). Retrieval is a **nested subgraph** (`agents/rag/retrieval_graph.py`): `router → ⇉ {one node per RAG method} → fuse` (Reciprocal Rank Fusion). Methods live in `agents/rag/methods.py` (`NODE_FUNCS`, gated by `ENABLED_METHODS`). The agent enters it via the `retrieve_documents` tool, which is bound to the model but **excluded from `ToolNode`** — its execution is the subgraph node, so LangSmith/Studio render one nested graph. Vector search uses the `match_documents` RPC (mirrors `match_memories`).
+
+### LLM→LLM delegation (KAN-5)
+An LLM can hand a task to another LLM via the `delegate` tool (`agents/tools/contextual/delegate.py`), which queues a `Delegation` on `ToolContext`. After the reply is persisted, `run_agent_stream` runs queued delegations — emits `agent_start`, then streams the target's reply into the same SSE response — bounded by `MAX_DELEGATION_HOPS` (currently 1). Plain `@mentions` in an LLM's text do NOT trigger anything; only the `delegate` tool does.
 
 ### Two views per chat
 The top-level `Chat.jsx` toggles between two view groups:
@@ -90,16 +103,13 @@ const channelName = `chat-${chatId}-${Date.now()}-${Math.random().toString(36).s
 Reusing channel names breaks under React 19 strict-mode double-mount with `cannot add postgres_changes after subscribe()`. The existing hooks already do this — match the pattern.
 
 ### Backend module split
-From `main.py`:
-- `config.py` — env loading, OpenAI/Supabase/JWKS clients, LangSmith setup.
-- `auth.py` — `get_current_user` (JWT via JWKS) and `verify_participant` (chat membership check). Every protected route calls both.
-- `schemas.py` — pydantic request/response models.
-- `context.py` — see "llm_connections" section above.
-- `tools.py` — `@tool`-decorated functions bound to the agent at graph build time. Tools currently don't need per-request context; if a future tool does, plumb it via `create_agent`'s `context_schema=` parameter.
-- `agents/chat_agent.py` — streaming chat reply (LangGraph).
-- `agents/planner_agent.py` — one-shot planner; uses `with_structured_output(PlannerResponse)` so output is guaranteed valid JSON.
-- `agents/join_agent.py` — generates the welcome message when an LLM joins.
-- `invitations.py` — invite endpoints (mounted as a router).
+`main.py` registers routers and calls `_setup_tracing()` (LangSmith). Layout:
+- `settings.py` — typed env vars (pydantic-settings). `dependencies.py` — constructed clients (`get_openai`, `get_supabase`, JWKS). `auth.py` — `get_current_user` (JWT via JWKS) + `verify_participant`; every protected route calls both.
+- `api/` — routers: `ask_llm.py` (`/askLLM` streaming), `messages.py`, `chats.py`, `participants.py`, `invitations.py`, `uploads.py`, plus `schemas.py` (pydantic models).
+- `usage.py` — plan limits, rate/budget gating (`check_and_gate`), token recording (`record_tokens`).
+- `agents/agent.py` — all agent entry points: `run_agent_stream` (streaming chat), `run_planner` (one-shot, `with_structured_output(PlannerResponse)`), `generate_join_message` (LLM-join greeting). `agents/context_builder.py` — the `llm_connections` visibility module (see above). `agents/graph.py` — module-level graph for Studio. `agents/prompts.py` — prompt strings. `agents/providers/registry.py` — `get_model(model_type)` (Anthropic/OpenAI/Gemini) + `is_claude`.
+- `agents/tools/` — tool package. `registry.py::get_tools(ctx)` assembles the toolset: `stateless/` (web_search, read_url, execute_code, read_file, create_chart, write_file, create_pdf) + `contextual/` (python_repl, query_chat, memory, delegate) which close over a `ToolContext`. Add new tools here. The `retrieve_documents` RAG tool is bound in `_build_graph` (not via `get_tools`) so it can be excluded from `ToolNode`.
+- `agents/rag/` — the RAG layer (see "RAG retrieval" above).
 
 ### Auth flow
 Frontend stores the Supabase session client-side. `apiFetch` in `src/services/supabase.js` automatically attaches `Authorization: Bearer <access_token>` to backend calls. The backend verifies the JWT via Supabase JWKS and looks up `chat_participants` to confirm membership before any chat-scoped operation.
@@ -108,7 +118,7 @@ Frontend stores the Supabase session client-side. `apiFetch` in `src/services/su
 - `glyph-frontend/.env` — `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_BACKEND_URL`.
 - `glyph-backend/.env` — OpenAI key, Supabase service-role key + URL, LangSmith config, `CORS_ORIGINS`, `PUBLIC_API_BASE`.
 
-LangSmith tracing is wired via `setup_tracing()` in `config.py`; every agent run lands in LangSmith automatically when the env vars are set.
+LangSmith tracing is wired via `_setup_tracing()` in `main.py` (gated on `LANGSMITH_TRACING=true` + `LANGSMITH_API_KEY`); every agent run lands in LangSmith automatically when those env vars are set. Note: these vars must be set on the **deployed** host too — `.env` is local-only, so production needs them configured separately or tracing silently stays off.
 
 ## Feature delivery workflow (per Jira task)
 
@@ -119,10 +129,10 @@ process after the implementation is complete and verified:
    (e.g. `docs/features/KAN-5-llm-delegation.md`). One file per task. The doc
    should cover: what the feature does, why, the key files/functions touched,
    how it works end-to-end, any config/DB/migration steps, and how to test it.
-2. **Attach the doc to the Jira task** via the Atlassian MCP — upload the `.md`
-   file as an attachment on the issue (preferred). If attachment isn't possible,
-   fall back to adding it as a comment on the issue. Always confirm which issue
-   key before posting.
+2. **Post the doc to the Jira task** via the Atlassian Remote MCP. The remote MCP
+   has **no file-attachment tool** — post the doc as a **comment** on the issue
+   (`addCommentToJiraIssue`, `contentFormat: "markdown"`), prefixed with the
+   branch/commit refs. Always confirm the issue key before posting.
 3. **Push the code** referencing the task: work on a branch named `<KEY>-<slug>`,
    prefix the commit subject with the key (`KAN-5: ...`), and push the branch to
    `origin`. The key in the branch/commit is what links the work back to the Jira
