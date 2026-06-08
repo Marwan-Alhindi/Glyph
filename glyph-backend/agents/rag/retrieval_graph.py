@@ -13,7 +13,6 @@ import logging
 import operator
 from typing import Annotated, TypedDict
 
-from langchain_core.messages import BaseMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 
 from agents.rag.methods import ALL_METHODS, ENABLED_METHODS, NODE_FUNCS, _llm_lines
@@ -25,10 +24,14 @@ RRF_K = 60         # Reciprocal Rank Fusion constant
 
 
 class RetrievalState(TypedDict, total=False):
-    messages: Annotated[list[BaseMessage], operator.add]  # shared with parent AgentState
+    # NOTE: deliberately does NOT share the parent's `messages` channel. A
+    # compiled subgraph used as a node writes its whole final state back to the
+    # parent; with an operator.add messages reducer that duplicates the entire
+    # history (incl. the system prompt) → "multiple non-consecutive system
+    # messages". Instead the subgraph takes {question, chat_id} and returns
+    # answer_context; the parent wrapper node turns that into one ToolMessage.
     chat_id: str
     question: str
-    tool_call_id: str
     methods: list[str]
     candidates: Annotated[list[dict], operator.add]
     answer_context: str
@@ -36,18 +39,8 @@ class RetrievalState(TypedDict, total=False):
 
 # ── router ────────────────────────────────────────────────────────────────────
 
-def _find_retrieve_call(messages):
-    """Return (question, tool_call_id) for the first retrieve_documents tool call."""
-    for msg in reversed(messages or []):
-        for tc in getattr(msg, "tool_calls", None) or []:
-            if tc.get("name") == "retrieve_documents":
-                args = tc.get("args") or {}
-                return args.get("question") or "", tc.get("id")
-    return "", None
-
-
 def router(state: RetrievalState) -> dict:
-    question, tool_call_id = _find_retrieve_call(state.get("messages"))
+    question = state.get("question") or ""
     methods = ["base_retriever"]
     if question:
         choices = _llm_lines(
@@ -64,7 +57,7 @@ def router(state: RetrievalState) -> dict:
         # No useful router output — use a sensible default ensemble.
         methods = ["base_retriever", "rag_fusion", "hyde"]
     logger.info("RAG router selected: %s", methods)
-    return {"question": question, "tool_call_id": tool_call_id, "methods": methods}
+    return {"methods": methods}
 
 
 def dispatch(state: RetrievalState) -> list[str]:
@@ -102,26 +95,8 @@ def fuse(state: RetrievalState) -> dict:
             blocks.append(f"[{cite}]\n{c.get('content', '').strip()}")
         answer_context = header + "\n\n" + "\n\n---\n\n".join(blocks)
 
-    # Satisfy every tool call in the triggering AI message so no tool_use dangles.
-    tool_messages = []
-    answered = False
-    for msg in reversed(state.get("messages") or []):
-        tool_calls = getattr(msg, "tool_calls", None)
-        if tool_calls:
-            for tc in tool_calls:
-                if tc.get("name") == "retrieve_documents" and not answered:
-                    tool_messages.append(ToolMessage(content=answer_context, tool_call_id=tc["id"]))
-                    answered = True
-                elif tc.get("name") == "retrieve_documents":
-                    tool_messages.append(ToolMessage(
-                        content="(see the retrieval result above)", tool_call_id=tc["id"]))
-                else:
-                    tool_messages.append(ToolMessage(
-                        content=f"(`{tc.get('name')}` was not run this turn — call it again on its own.)",
-                        tool_call_id=tc["id"]))
-            break
-
-    return {"answer_context": answer_context, "messages": tool_messages}
+    # Return only answer_context — the parent wrapper node builds the ToolMessage.
+    return {"answer_context": answer_context}
 
 
 # ── build ─────────────────────────────────────────────────────────────────────
