@@ -109,3 +109,31 @@ Frontend stores the Supabase session client-side. `apiFetch` in `src/services/su
 - `glyph-backend/.env` — OpenAI key, Supabase service-role key + URL, LangSmith config, `CORS_ORIGINS`, `PUBLIC_API_BASE`.
 
 LangSmith tracing is wired via `setup_tracing()` in `config.py`; every agent run lands in LangSmith automatically when the env vars are set.
+
+## Feature delivery workflow (per Jira task)
+
+When the user describes a feature and gives a Jira task key (e.g. `KAN-5`), run this
+process after the implementation is complete and verified:
+
+1. **Document** the feature as Markdown at `docs/features/<KEY>-<short-slug>.md`
+   (e.g. `docs/features/KAN-5-llm-delegation.md`). One file per task. The doc
+   should cover: what the feature does, why, the key files/functions touched,
+   how it works end-to-end, any config/DB/migration steps, and how to test it.
+2. **Attach the doc to the Jira task** via the Atlassian MCP — upload the `.md`
+   file as an attachment on the issue (preferred). If attachment isn't possible,
+   fall back to adding it as a comment on the issue. Always confirm which issue
+   key before posting.
+3. **Push the code** referencing the task: work on a branch named `<KEY>-<slug>`,
+   prefix the commit subject with the key (`KAN-5: ...`), and push the branch to
+   `origin`. The key in the branch/commit is what links the work back to the Jira
+   task. Open a PR only when the user asks.
+4. **Merge to `main`** (solo workflow — the user works alone): after pushing the
+   branch, fast-forward/merge `<KEY>-<slug>` into `main` and push `main` to
+   `origin`. Do this automatically as part of the task; no PR review needed.
+
+Notes:
+- Jira access is via the **Atlassian Remote MCP** server (set up once with
+  `claude mcp add`). If the MCP tools aren't available in a session, tell the
+  user rather than skipping the upload silently.
+- Don't push or post to Jira unless the user has given the task key for the
+  current work — these are outward-facing actions.
