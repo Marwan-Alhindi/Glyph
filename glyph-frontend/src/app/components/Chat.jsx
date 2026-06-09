@@ -304,7 +304,9 @@ function Chat({ chatId }) {
                 kind: 'person',
                 profile: p,
         }))
-        return [...people, ...llms]
+        // LLMs first: an active @Name is a model trigger, so on a name shared by
+        // a person and a model the model wins (mirrored in Message.jsx coloring).
+        return [...llms, ...people]
     }, [invitedLLMs, profilesById, user?.id])
 
     const mentionGroups = useMemo(() => ({

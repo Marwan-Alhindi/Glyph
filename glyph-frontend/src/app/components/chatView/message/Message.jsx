@@ -53,7 +53,10 @@ function Message({
                 kind: 'person',
                 profile: p,
             }))
-        const mentions = findMentions(text, [...personMentionables, ...llmMentionables])
+        // LLMs first so a name shared by a person and a model resolves to the
+        // model — keeps the mention's color identical to the model panel, and
+        // matches the trigger precedence in Chat.jsx.
+        const mentions = findMentions(text, [...llmMentionables, ...personMentionables])
         const parts = []
         let cursor = 0
         for (const m of mentions) {
