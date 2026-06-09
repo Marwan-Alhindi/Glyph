@@ -27,6 +27,11 @@ class PlanAgentRequest(BaseModel):
     chat_id: str
 
 
+class CheckoutRequest(BaseModel):
+    """Start a Noon Hosted Checkout for a paid plan (KAN-10)."""
+    plan: str  # "pro" | "max"
+
+
 class PlanItem(BaseModel):
     """One step in the planner's ordered execution plan."""
     date: str = Field(

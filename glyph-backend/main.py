@@ -14,6 +14,7 @@ from api.participants import router as participants_router
 from api.invitations import router as invitations_router
 from api.uploads import router as uploads_router
 from api.integrations.router import router as integrations_router
+from api.payments import router as payments_router
 
 
 def _setup_tracing() -> None:
@@ -59,3 +60,4 @@ app.include_router(participants_router)
 app.include_router(invitations_router)
 app.include_router(uploads_router)
 app.include_router(integrations_router)
+app.include_router(payments_router)

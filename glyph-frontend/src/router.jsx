@@ -18,6 +18,7 @@ import AuthCallback from './marketing/pages/AuthCallback'
 // App Pages
 import ChatPage from './app/pages/ChatPage'
 import AcceptInvite from './app/pages/AcceptInvite'
+import BillingReturn from './app/pages/BillingReturn'
 
 // Auth
 import ProtectedRoute from './components/ProtectedRoute'
@@ -42,7 +43,8 @@ const router = createBrowserRouter([
         element: <ProtectedRoute><AppLayout /></ProtectedRoute>,
         children: [
           { path: '', element: null },
-          { path: 'chat/:chatId', element: <ChatPage /> }
+          { path: 'chat/:chatId', element: <ChatPage /> },
+          { path: 'billing/return', element: <BillingReturn /> }
         ]
       }
     ]

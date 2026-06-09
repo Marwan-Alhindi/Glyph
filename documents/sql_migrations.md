@@ -479,3 +479,50 @@ as $$
     limit match_count;
 $$;
 ```
+
+## 0015_noon_subscriptions.sql
+
+```sql
+-- Noon Payments subscriptions (KAN-10).
+-- payment_orders: one row per checkout attempt — the idempotency/audit log.
+-- subscriptions:  current paid state per user (one row each).
+-- profiles.plan (added in 0013) stays the effective entitlement read by usage.py;
+-- the backend updates it in lockstep with subscriptions.activate().
+
+CREATE TABLE IF NOT EXISTS payment_orders (
+  id              uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_reference text        NOT NULL UNIQUE,           -- our id, sent to Noon as order.reference
+  noon_order_id   text,                                  -- Noon's order id (result.order.id)
+  user_id         uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  plan            text        NOT NULL CHECK (plan IN ('pro', 'max')),
+  amount          numeric(12,2) NOT NULL,
+  currency        text        NOT NULL DEFAULT 'SAR',
+  status          text        NOT NULL DEFAULT 'initiated'
+                    CHECK (status IN ('initiated', 'paid', 'failed', 'canceled')),
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS payment_orders_user_idx ON payment_orders(user_id);
+
+CREATE TABLE IF NOT EXISTS subscriptions (
+  id                 uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id            uuid        NOT NULL UNIQUE REFERENCES auth.users(id) ON DELETE CASCADE,
+  plan               text        NOT NULL CHECK (plan IN ('pro', 'max')),
+  status             text        NOT NULL DEFAULT 'active'
+                       CHECK (status IN ('active', 'past_due', 'canceled')),
+  noon_card_token    text,                               -- vaulted card for renewals (tokenizeCc)
+  current_period_end timestamptz,
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  updated_at         timestamptz NOT NULL DEFAULT now()
+);
+
+-- Backend writes via service key (bypasses RLS). Users may read their own rows.
+ALTER TABLE payment_orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE subscriptions  ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "payment_orders_read_own" ON payment_orders
+  FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "subscriptions_read_own" ON subscriptions
+  FOR SELECT USING (auth.uid() = user_id);
+```

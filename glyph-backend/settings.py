@@ -45,9 +45,26 @@ class Settings(BaseSettings):
     langsmith_api_key: str = "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"
     langsmith_project: str = "(default)"
 
+    # Noon Payments (KAN-10). The three credentials come from the Noon merchant
+    # portal: Account Settings → Applications. noon_mode flips the API base
+    # between the sandbox and live hosts.
+    noon_business_id: str = ""
+    noon_application: str = ""
+    noon_api_key: str = ""
+    noon_mode: str = "Test"  # "Test" | "Live"
+    # Regional shard the merchant is provisioned in (the portal host, e.g.
+    # portal-test.sa.noonpayments.com → "sa"). Empty = the global host.
+    noon_region: str = "sa"
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",")]
+
+    @property
+    def noon_api_base(self) -> str:
+        sub = "api" if self.noon_mode.lower() == "live" else "api-test"
+        region = f".{self.noon_region}" if self.noon_region else ""
+        return f"https://{sub}{region}.noonpayments.com/payment/v1"
 
 
 @lru_cache
