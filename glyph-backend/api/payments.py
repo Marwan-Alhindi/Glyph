@@ -26,16 +26,16 @@ from api.schemas import CheckoutRequest
 router = APIRouter(prefix="/payments")
 
 
-def _apply_paid_order(reference: str) -> str:
+def _apply_paid_order(reference: str) -> dict:
     """Re-fetch the order from Noon and, if paid, activate the subscription.
-    Returns the resulting order status. Idempotent."""
+    Returns {status, detail}. Idempotent."""
     repo = SubscriptionRepository()
     order = repo.get_order(reference)
     if not order:
         raise HTTPException(status_code=404, detail="Unknown order")
 
     if order["status"] == "paid":
-        return "paid"  # already applied — nothing to do
+        return {"status": "paid", "detail": None}  # already applied
 
     noon_order_id = order.get("noon_order_id")
     if not noon_order_id:
@@ -44,7 +44,7 @@ def _apply_paid_order(reference: str) -> str:
     remote = noon.get_order(noon_order_id)
     if remote["status"] != "SUCCESS":
         repo.mark_order(reference, "failed")
-        return "failed"
+        return {"status": "failed", "detail": remote.get("error_message")}
 
     repo.activate(
         user_id=order["user_id"],
@@ -54,7 +54,7 @@ def _apply_paid_order(reference: str) -> str:
         subscription_id=remote.get("subscription_id"),
     )
     repo.mark_order(reference, "paid")
-    return "paid"
+    return {"status": "paid", "detail": None}
 
 
 @router.post("/checkout")
@@ -110,8 +110,8 @@ def verify(reference: str, authorization: str = Header()):
     if not order or order["user_id"] != user_id:
         raise HTTPException(status_code=404, detail="Unknown order")
 
-    status = _apply_paid_order(reference)
-    return {"status": status, "plan": order["plan"]}
+    result = _apply_paid_order(reference)
+    return {"status": result["status"], "plan": order["plan"], "detail": result.get("detail")}
 
 
 @router.post("/webhook")

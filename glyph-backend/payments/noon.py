@@ -117,18 +117,23 @@ def get_order(noon_order_id: str) -> dict:
     body = resp.json()
     result = body.get("result", {})
 
+    order = result.get("order", {})
     txns = result.get("transactions") or []
-    status = txns[0].get("status") if txns else result.get("order", {}).get("status")
+    status = txns[0].get("status") if txns else order.get("status")
 
     # Vaulted card lives under paymentDetails.tokenIdentifier (confirmed via sandbox).
     payment = result.get("paymentDetails") or {}
     card_token = payment.get("tokenIdentifier")
     subscription_id = (result.get("subscription") or {}).get("identifier")
 
+    # Decline reason for failed orders, e.g. 19047 "3DS unable to authenticate."
+    error_message = order.get("errorMessage") if order.get("errorCode") else None
+
     return {
         "status": status,
         "card_token": card_token,
         "subscription_id": subscription_id,
+        "error_message": error_message,
         "raw": body,
     }
 

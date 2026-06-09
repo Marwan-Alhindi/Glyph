@@ -68,7 +68,7 @@ function AppLayout() {
         if (!ref) return
         localStorage.removeItem('glyph_pending_payment')
         apiFetch(`/payments/verify/${encodeURIComponent(ref)}`)
-            .then(({ status, plan }) => setPaymentNotice({ status, plan }))
+            .then(({ status, plan, detail }) => setPaymentNotice({ status, plan, detail }))
             .catch(() => setPaymentNotice({ status: 'error' }))
     }, [user?.id])
 
@@ -783,6 +783,8 @@ function PaymentNoticeModal({ notice, onClose }) {
         ? 'Your subscription is active and your new limits are live.'
         : notice.status === 'error'
         ? 'If you were charged, it will be applied automatically shortly. Otherwise you can try again.'
+        : notice.detail
+        ? `The payment didn't go through — you weren't charged. (${notice.detail})`
         : "The payment didn't go through — you weren't charged."
 
     return (
