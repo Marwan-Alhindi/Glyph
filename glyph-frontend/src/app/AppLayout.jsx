@@ -815,8 +815,9 @@ function BillingModal({ currentPlan, onClose }) {
     const [error, setError] = useState("")
     const [periodEnd, setPeriodEnd] = useState(null)
 
-    // One-time monthly: while a paid plan is active you keep it until it lapses,
-    // so plan switching is locked until renewal. Only a free (lapsed) user buys.
+    // One-time monthly: you may upgrade mid-cycle (prorated) but not downgrade —
+    // a lower plan is chosen when the current one renews.
+    const RANK = { free: 0, pro: 1, max: 2 }
     const onPaidPlan = currentPlan !== 'free'
     const untilDate = periodEnd ? new Date(periodEnd).toLocaleDateString() : null
 
@@ -827,7 +828,7 @@ function BillingModal({ currentPlan, onClose }) {
     }, [])
 
     async function handleUpgrade(planId) {
-        if (planId === currentPlan || planId === 'free' || onPaidPlan || pendingPlan) return
+        if (planId === currentPlan || planId === 'free' || pendingPlan) return
         setError("")
         setPendingPlan(planId)
         try {
@@ -870,10 +871,11 @@ function BillingModal({ currentPlan, onClose }) {
                 <div className="grid grid-cols-3 gap-4 p-6">
                     {PLANS.map(plan => {
                         const isCurrent = plan.id === currentPlan
-                        // Buy a paid plan only when you're on free (lapsed). While a
-                        // paid plan is active, switching waits until renewal.
-                        const purchasable = !isCurrent && plan.id !== 'free' && !onPaidPlan
-                        const lockedUntilRenewal = !isCurrent && onPaidPlan
+                        // A higher-ranked paid plan is purchasable (fresh buy from
+                        // free, or a prorated upgrade). A lower plan is a downgrade,
+                        // which only happens at renewal — so it's locked.
+                        const purchasable = plan.id !== 'free' && RANK[plan.id] > RANK[currentPlan]
+                        const lockedUntilRenewal = !isCurrent && !purchasable
                         return (
                             <div
                                 key={plan.id}
@@ -925,6 +927,8 @@ function BillingModal({ currentPlan, onClose }) {
                                         ? 'At renewal'
                                         : pendingPlan === plan.id
                                         ? 'Redirecting…'
+                                        : onPaidPlan
+                                        ? 'Upgrade'
                                         : `Choose ${plan.name}`}
                                 </button>
                             </div>
@@ -938,7 +942,9 @@ function BillingModal({ currentPlan, onClose }) {
                     </p>
                 ) : (
                     <p className="border-t border-[var(--color-line-soft)] px-6 py-3 text-center text-xs text-[var(--color-fg-subtle)]">
-                        One-time payment per month · secure checkout by noon payments. Renew anytime to keep your plan.
+                        {onPaidPlan
+                            ? 'Upgrades are charged at the prorated difference for the days left in your period.'
+                            : 'One-time payment per month · secure checkout by noon payments. Renew anytime to keep your plan.'}
                     </p>
                 )}
             </div>

@@ -17,10 +17,12 @@ import uuid
 import httpx
 from fastapi import APIRouter, Header, HTTPException, Request
 
+from datetime import datetime, timezone
+
 from auth import get_current_user
 from dependencies import get_supabase
 from database.subscriptions import SubscriptionRepository
-from database.usage import UsageRepository
+from database.usage import UsageRepository, _parse_ts
 from payments import noon, plans
 from settings import get_settings
 from api.schemas import CheckoutRequest
@@ -50,11 +52,19 @@ def _apply_paid_order(reference: str) -> dict:
 
     # One-time monthly: grant the plan for one period. It lapses to free at
     # current_period_end (enforced in UsageRepository.get_plan) until the user
-    # pays again.
+    # pays again. A mid-cycle upgrade keeps the period the user already paid for
+    # (they only paid the prorated difference); a fresh purchase starts a new one.
+    period_end = plans.next_period_end()
+    existing = repo.get_subscription(order["user_id"])
+    if existing and existing.get("current_period_end"):
+        pe = _parse_ts(existing["current_period_end"])
+        if pe > datetime.now(timezone.utc) and plans.is_upgrade(existing["plan"], order["plan"]):
+            period_end = pe
+
     repo.activate(
         user_id=order["user_id"],
         plan=order["plan"],
-        period_end=plans.next_period_end(),
+        period_end=period_end,
         card_token=None,
     )
     repo.mark_order(reference, "paid")
@@ -69,22 +79,33 @@ def checkout(body: CheckoutRequest, authorization: str = Header()):
     if not plans.is_purchasable(plan):
         raise HTTPException(status_code=400, detail=f"Plan '{plan}' is not purchasable")
 
-    # One-time monthly: no mid-cycle switching. If a paid plan is still active,
-    # the user keeps it until it lapses to free, then chooses again.
-    if UsageRepository().get_plan(user_id) != "free":
+    repo = SubscriptionRepository()
+    current = UsageRepository().get_plan(user_id)
+
+    # One-time monthly: you may upgrade mid-cycle (pay the prorated difference)
+    # but not downgrade — a lower plan is chosen when the current one renews.
+    if plan == current:
+        raise HTTPException(status_code=409, detail="You're already on this plan.")
+    if current != "free" and not plans.is_upgrade(current, plan):
         raise HTTPException(
             status_code=409,
-            detail="You already have an active plan. You can choose a plan again when it renews.",
+            detail="You can switch to a lower plan when your current plan renews.",
         )
+
+    if current == "free":
+        amount = plans.price_str(plan)  # full month
+    else:
+        # Mid-cycle upgrade: charge the prorated difference for the remaining days.
+        sub = repo.get_subscription(user_id) or {}
+        period_end = _parse_ts(sub["current_period_end"])
+        amount = plans.prorated_upgrade_amount(current, plan, period_end)
 
     s = get_settings()
     if not (s.noon_business_id and s.noon_application and s.noon_api_key):
         raise HTTPException(status_code=503, detail="Payments are not configured")
 
     reference = uuid.uuid4().hex
-    amount = plans.price_str(plan)
 
-    repo = SubscriptionRepository()
     repo.create_order(
         reference=reference,
         user_id=user_id,
@@ -106,11 +127,16 @@ def checkout(body: CheckoutRequest, authorization: str = Header()):
 
     return_url = f"{s.app_url}/app/billing/return?ref={reference}"
     try:
+        order_name = (
+            f"Upgrade to {plans.PLAN_NAMES[plan]}"
+            if current != "free"
+            else f"{plans.PLAN_NAMES[plan]} ({plans.PERIOD_DAYS}-day access)"
+        )
         result = noon.initiate_order(
             reference=reference,
             amount=amount,
             currency=plans.CURRENCY,
-            name=f"{plans.PLAN_NAMES[plan]} ({plans.PERIOD_DAYS}-day access)",
+            name=order_name,
             return_url=return_url,
             customer_email=email,
             customer_first=first,
