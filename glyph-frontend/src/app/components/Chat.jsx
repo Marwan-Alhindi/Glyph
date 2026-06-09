@@ -737,7 +737,10 @@ function Chat({ chatId }) {
             const rect = container.getBoundingClientRect()
             const deltaPx = (e.clientX - activeResize.startX) * (lang === 'ar' ? -1 : 1)
             const deltaPct = (deltaPx / rect.width) * 100
-            const MIN = 15
+            // Pixel floor (must match the panes' md:min-w-[18rem]) so a pane can
+            // never be dragged narrower than its header — otherwise the header's
+            // shrink-0 controls overflow and paint over the neighboring pane.
+            const MIN = Math.min(40, (18 * 16 / rect.width) * 100)
             let newLeft = activeResize.startLeft + deltaPct
             let newRight = activeResize.startRight - deltaPct
             if (newLeft < MIN) { newRight -= (MIN - newLeft); newLeft = MIN }
@@ -2122,7 +2125,7 @@ function Chat({ chatId }) {
                         {panels.map((p, i) => (
                             <Fragment key={p.key}>
                                 <div
-                                    className={`min-h-0 w-full flex-1 md:flex md:w-[var(--panel-w)] md:flex-none ${mobileTab === p.key ? 'flex' : 'hidden md:flex'}`}
+                                    className={`min-h-0 min-w-0 w-full flex-1 md:flex md:grow-0 md:shrink md:basis-[var(--panel-w)] md:min-w-[18rem] ${mobileTab === p.key ? 'flex' : 'hidden md:flex'}`}
                                     style={{ '--panel-w': `${panelWidths[p.key]}%` }}
                                 >
                                     {p.node}
