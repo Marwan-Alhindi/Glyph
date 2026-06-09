@@ -807,6 +807,7 @@ function PaymentNoticeModal({ notice, onClose }) {
 function BillingModal({ currentPlan, onClose }) {
     const [pendingPlan, setPendingPlan] = useState(null)
     const [error, setError] = useState("")
+    const [notice, setNotice] = useState("")
 
     async function handleUpgrade(planId) {
         if (planId === currentPlan || planId === 'free' || pendingPlan) return
@@ -824,6 +825,25 @@ function BillingModal({ currentPlan, onClose }) {
             window.location.href = checkout_url
         } catch (err) {
             setError(err.detail || err.message || "Could not start checkout.")
+            setPendingPlan(null)
+        }
+    }
+
+    async function handleCancel() {
+        if (pendingPlan) return
+        const ok = window.confirm(
+            "Cancel your subscription? You'll keep your current plan until the end of the billing period, then move to Free."
+        )
+        if (!ok) return
+        setError("")
+        setPendingPlan('cancel')
+        try {
+            const res = await apiFetch('/payments/cancel', { method: 'POST' })
+            const until = res.access_until ? new Date(res.access_until).toLocaleDateString() : 'the period end'
+            setNotice(`Subscription canceled. You keep ${currentPlan} access until ${until}, then move to Free.`)
+        } catch (err) {
+            setError(err.detail || err.message || "Could not cancel.")
+        } finally {
             setPendingPlan(null)
         }
     }
@@ -888,7 +908,7 @@ function BillingModal({ currentPlan, onClose }) {
                                     ))}
                                 </ul>
                                 <button
-                                    onClick={() => handleUpgrade(plan.id)}
+                                    onClick={() => isDowngrade ? handleCancel() : handleUpgrade(plan.id)}
                                     disabled={isCurrent || !!pendingPlan}
                                     className={`mt-4 w-full rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
                                         isCurrent
@@ -900,10 +920,10 @@ function BillingModal({ currentPlan, onClose }) {
                                 >
                                     {isCurrent
                                         ? 'Current plan'
+                                        : isDowngrade
+                                        ? (pendingPlan === 'cancel' ? 'Canceling…' : 'Cancel plan')
                                         : pendingPlan === plan.id
                                         ? 'Redirecting…'
-                                        : isDowngrade
-                                        ? 'Downgrade'
                                         : 'Upgrade'}
                                 </button>
                             </div>
@@ -914,6 +934,10 @@ function BillingModal({ currentPlan, onClose }) {
                 {error ? (
                     <p className="border-t border-[var(--color-line-soft)] px-6 py-3 text-center text-xs text-red-400">
                         {error}
+                    </p>
+                ) : notice ? (
+                    <p className="border-t border-[var(--color-line-soft)] px-6 py-3 text-center text-xs text-emerald-400">
+                        {notice}
                     </p>
                 ) : (
                     <p className="border-t border-[var(--color-line-soft)] px-6 py-3 text-center text-xs text-[var(--color-fg-subtle)]">

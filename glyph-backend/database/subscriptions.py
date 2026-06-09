@@ -59,7 +59,13 @@ class SubscriptionRepository:
     # --- subscriptions + entitlement ------------------------------------
 
     def activate(
-        self, *, user_id: str, plan: str, period_end: datetime, card_token: str | None
+        self,
+        *,
+        user_id: str,
+        plan: str,
+        period_end: datetime,
+        card_token: str | None,
+        subscription_id: str | None = None,
     ) -> None:
         """Upsert the subscription to active and flip the user's effective plan.
         Idempotent: replaying the same paid order just re-writes the same state."""
@@ -67,20 +73,64 @@ class SubscriptionRepository:
             "user_id": user_id,
             "plan": plan,
             "status": "active",
+            "cancel_at_period_end": False,
             "current_period_end": period_end.isoformat(),
         }
         if card_token:
             row["noon_card_token"] = card_token
+        if subscription_id:
+            row["noon_subscription_id"] = subscription_id
         self._db.table("subscriptions").upsert(row, on_conflict="user_id").execute()
         self._db.table("profiles").update({"plan": plan}).eq("id", user_id).execute()
 
     def get_subscription(self, user_id: str) -> dict | None:
         result = (
             self._db.table("subscriptions")
-            .select("plan, status, current_period_end")
+            .select("plan, status, current_period_end, cancel_at_period_end, noon_subscription_id")
             .eq("user_id", user_id)
             .limit(1)
             .execute()
         )
         rows = result.data or []
         return rows[0] if rows else None
+
+    def mark_cancel_at_period_end(self, user_id: str) -> None:
+        """Flag the subscription to not renew. Access is kept until
+        current_period_end, after which it reverts to free."""
+        self._db.table("subscriptions").update(
+            {"status": "canceled", "cancel_at_period_end": True}
+        ).eq("user_id", user_id).execute()
+
+    def latest_paid_order(self, user_id: str) -> dict | None:
+        """The most recent paid order for a user — its noon_order_id is the
+        anchor Noon needs to cancel the recurring subscription."""
+        result = (
+            self._db.table("payment_orders")
+            .select("noon_order_id, plan")
+            .eq("user_id", user_id)
+            .eq("status", "paid")
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = result.data or []
+        return rows[0] if rows else None
+
+    def extend_period(self, subscription_id: str, period_end: datetime) -> bool:
+        """Advance an active subscription's period after a renewal charge.
+        Matches on Noon's subscription identifier (the webhook's anchor).
+        Returns True if a row was updated."""
+        result = (
+            self._db.table("subscriptions")
+            .update({"current_period_end": period_end.isoformat(), "status": "active"})
+            .eq("noon_subscription_id", subscription_id)
+            .execute()
+        )
+        return bool(result.data)
+
+    def revert_to_free(self, user_id: str) -> None:
+        """Drop the user to the free plan (period lapsed / canceled)."""
+        self._db.table("subscriptions").update({"status": "canceled"}).eq(
+            "user_id", user_id
+        ).execute()
+        self._db.table("profiles").update({"plan": "free"}).eq("id", user_id).execute()

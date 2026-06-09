@@ -46,8 +46,15 @@ def initiate_order(
     currency: str,
     name: str,
     return_url: str,
+    subscription_name: str | None = None,
+    payment_frequency_days: int | None = None,
 ) -> dict:
     """Create a Noon order and return {noon_order_id, post_url, raw}.
+
+    When subscription_name + payment_frequency_days are given, the order is
+    registered as a RECURRING subscription: Noon vaults the card and then
+    auto-charges it every `payment_frequency_days` (gateway-managed — we don't
+    submit the renewals, Noon does and notifies us via webhook).
 
     Raises httpx.HTTPStatusError on a non-2xx, or ValueError if Noon reports a
     non-zero resultCode or omits the checkout URL.
@@ -70,6 +77,14 @@ def initiate_order(
             "tokenizeCc": True,
         },
     }
+    if subscription_name and payment_frequency_days:
+        # paymentFrequency is a day count, sent as a string (confirmed via sandbox).
+        payload["subscription"] = {
+            "type": "RECURRING",
+            "name": subscription_name,
+            "amount": amount,
+            "paymentFrequency": str(payment_frequency_days),
+        }
 
     with httpx.Client(timeout=30) as client:
         resp = client.post(f"{s.noon_api_base}/order", json=payload, headers=_headers())
@@ -90,9 +105,11 @@ def initiate_order(
 
 
 def get_order(noon_order_id: str) -> dict:
-    """Fetch an order. Returns {status, captured, raw} where status is the
-    latest transaction status ("SUCCESS"/"FAILED"/...) and captured is the
-    saved-card token if Noon vaulted one (for renewals)."""
+    """Fetch an order. Returns {status, card_token, subscription_id, raw}:
+      status          — latest transaction status ("SUCCESS"/"FAILED"/...)
+      card_token      — Noon's vaulted-card token (tokenIdentifier) for renewals
+      subscription_id — Noon's subscription identifier when one was registered
+    """
     s = get_settings()
     with httpx.Client(timeout=30) as client:
         resp = client.get(f"{s.noon_api_base}/order/{noon_order_id}", headers=_headers())
@@ -103,8 +120,38 @@ def get_order(noon_order_id: str) -> dict:
     txns = result.get("transactions") or []
     status = txns[0].get("status") if txns else result.get("order", {}).get("status")
 
-    # Noon returns the vaulted card under paymentDetails when tokenizeCc was set.
+    # Vaulted card lives under paymentDetails.tokenIdentifier (confirmed via sandbox).
     payment = result.get("paymentDetails") or {}
-    card_token = payment.get("cardToken") or payment.get("token")
+    card_token = payment.get("tokenIdentifier")
+    subscription_id = (result.get("subscription") or {}).get("identifier")
 
-    return {"status": status, "card_token": card_token, "raw": body}
+    return {
+        "status": status,
+        "card_token": card_token,
+        "subscription_id": subscription_id,
+        "raw": body,
+    }
+
+
+def cancel_subscription(noon_order_id: str, subscription_id: str) -> bool:
+    """Ask Noon to stop a recurring subscription's future auto-charges.
+
+    Uses the order CANCEL operation, which accepts the subscription identifier
+    and the originating order id (confirmed reachable via sandbox). Returns True
+    on a zero resultCode. Best-effort: never raises, so our own cancel state can
+    proceed even if Noon errors — callers should log a False return.
+
+    NOTE: validate the exact CANCEL contract against Noon's docs before go-live.
+    """
+    s = get_settings()
+    payload = {
+        "apiOperation": "CANCEL",
+        "order": {"id": noon_order_id},
+        "subscription": {"identifier": subscription_id},
+    }
+    try:
+        with httpx.Client(timeout=30) as client:
+            resp = client.post(f"{s.noon_api_base}/order", json=payload, headers=_headers())
+        return resp.json().get("resultCode") in (0, "0")
+    except (httpx.HTTPError, ValueError):
+        return False

@@ -10,6 +10,10 @@ from decimal import Decimal
 
 CURRENCY = "SAR"
 
+# Billing cycle length. Sent to Noon as the subscription paymentFrequency (days),
+# and used to advance current_period_end on each successful charge.
+PERIOD_DAYS = 30
+
 # Monthly price per paid plan. Adjust these freely.
 PLAN_PRICES: dict[str, Decimal] = {
     "pro": Decimal("49.00"),
@@ -32,6 +36,11 @@ def price_str(plan: str) -> str:
 
 
 def next_period_end(start: datetime | None = None) -> datetime:
-    """One monthly billing period from `start` (default: now, UTC)."""
+    """One billing period from `start` (default: now, UTC)."""
     base = start or datetime.now(timezone.utc)
-    return base + timedelta(days=30)
+    return base + timedelta(days=PERIOD_DAYS)
+
+
+def subscription_name(plan: str) -> str:
+    """Display name Noon stores for the recurring subscription."""
+    return f"{PLAN_NAMES[plan]} monthly"

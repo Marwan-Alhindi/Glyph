@@ -526,3 +526,19 @@ CREATE POLICY "payment_orders_read_own" ON payment_orders
 CREATE POLICY "subscriptions_read_own" ON subscriptions
   FOR SELECT USING (auth.uid() = user_id);
 ```
+
+## 0016_subscription_recurring.sql
+
+```sql
+-- Recurring billing + cancel (KAN-21). Noon manages the recurring schedule
+-- (gateway-managed): the first checkout registers a RECURRING subscription and
+-- Noon auto-charges each cycle, notifying us via webhook. We store its
+-- identifier to match renewals and to cancel.
+
+ALTER TABLE subscriptions
+  ADD COLUMN IF NOT EXISTS noon_subscription_id text,
+  ADD COLUMN IF NOT EXISTS cancel_at_period_end boolean NOT NULL DEFAULT false;
+
+CREATE INDEX IF NOT EXISTS subscriptions_noon_sub_idx
+  ON subscriptions(noon_subscription_id);
+```
