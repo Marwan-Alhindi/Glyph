@@ -46,8 +46,12 @@ def initiate_order(
     currency: str,
     name: str,
     return_url: str,
+    customer_email: str | None = None,
+    customer_first: str | None = None,
+    customer_last: str | None = None,
+    country: str = "SA",
 ) -> dict:
-    """Create a Noon order and return {noon_order_id, post_url, raw}.
+    """Create a one-time Noon order and return {noon_order_id, post_url, raw}.
 
     Raises httpx.HTTPStatusError on a non-2xx, or ValueError if Noon reports a
     non-zero resultCode or omits the checkout URL.
@@ -67,9 +71,20 @@ def initiate_order(
             "returnUrl": return_url,
             "locale": "en",
             "paymentAction": _PAYMENT_ACTION,
-            "tokenizeCc": True,
         },
     }
+
+    # Cardholder details for 3DS. KSA mandates 3DS in production; 3DS2 needs an
+    # identity to authenticate against. Field shape confirmed via sandbox.
+    if customer_email:
+        payload["billing"] = {
+            "contact": {
+                "firstName": customer_first or "",
+                "lastName": customer_last or "",
+                "email": customer_email,
+            },
+            "address": {"country": country},
+        }
 
     with httpx.Client(timeout=30) as client:
         resp = client.post(f"{s.noon_api_base}/order", json=payload, headers=_headers())
@@ -90,21 +105,19 @@ def initiate_order(
 
 
 def get_order(noon_order_id: str) -> dict:
-    """Fetch an order. Returns {status, captured, raw} where status is the
-    latest transaction status ("SUCCESS"/"FAILED"/...) and captured is the
-    saved-card token if Noon vaulted one (for renewals)."""
+    """Fetch an order. Returns {status, error_message, raw} where status is the
+    latest transaction status ("SUCCESS"/"FAILED"/...) and error_message is the
+    decline reason for failed orders (e.g. 19047 "3DS unable to authenticate")."""
     s = get_settings()
     with httpx.Client(timeout=30) as client:
         resp = client.get(f"{s.noon_api_base}/order/{noon_order_id}", headers=_headers())
     resp.raise_for_status()
     body = resp.json()
     result = body.get("result", {})
+    order = result.get("order", {})
 
     txns = result.get("transactions") or []
-    status = txns[0].get("status") if txns else result.get("order", {}).get("status")
+    status = txns[0].get("status") if txns else order.get("status")
+    error_message = order.get("errorMessage") if order.get("errorCode") else None
 
-    # Noon returns the vaulted card under paymentDetails when tokenizeCc was set.
-    payment = result.get("paymentDetails") or {}
-    card_token = payment.get("cardToken") or payment.get("token")
-
-    return {"status": status, "card_token": card_token, "raw": body}
+    return {"status": status, "error_message": error_message, "raw": body}

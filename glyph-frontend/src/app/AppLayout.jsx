@@ -68,7 +68,8 @@ function AppLayout() {
         if (!ref) return
         localStorage.removeItem('glyph_pending_payment')
         apiFetch(`/payments/verify/${encodeURIComponent(ref)}`)
-            .then(({ status, plan }) => setPaymentNotice({ status, plan }))
+            .then(({ status, plan, detail, access_until }) =>
+                setPaymentNotice({ status, plan, detail, access_until }))
             .catch(() => setPaymentNotice({ status: 'error' }))
     }, [user?.id])
 
@@ -779,10 +780,15 @@ function PaymentNoticeModal({ notice, onClose }) {
         : notice.status === 'error'
         ? "We couldn't confirm your payment"
         : 'Payment not completed'
+    const accessUntil = notice.access_until ? new Date(notice.access_until).toLocaleDateString() : null
     const body = paid
-        ? 'Your subscription is active and your new limits are live.'
+        ? (accessUntil
+            ? `Active until ${accessUntil}. Pay again after that to keep your plan.`
+            : 'Your plan is active. It renews monthly with each payment.')
         : notice.status === 'error'
         ? 'If you were charged, it will be applied automatically shortly. Otherwise you can try again.'
+        : notice.detail
+        ? `The payment didn't go through — you weren't charged. (${notice.detail})`
         : "The payment didn't go through — you weren't charged."
 
     return (
@@ -917,7 +923,7 @@ function BillingModal({ currentPlan, onClose }) {
                     </p>
                 ) : (
                     <p className="border-t border-[var(--color-line-soft)] px-6 py-3 text-center text-xs text-[var(--color-fg-subtle)]">
-                        Secure checkout by noon payments. You can cancel anytime.
+                        One-time payment per month · secure checkout by noon payments. Renew anytime to keep your plan.
                     </p>
                 )}
             </div>
