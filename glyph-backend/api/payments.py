@@ -18,6 +18,7 @@ import httpx
 from fastapi import APIRouter, Header, HTTPException, Request
 
 from auth import get_current_user
+from dependencies import get_supabase
 from database.subscriptions import SubscriptionRepository
 from payments import noon, plans
 from settings import get_settings
@@ -81,6 +82,18 @@ def checkout(body: CheckoutRequest, authorization: str = Header()):
         currency=plans.CURRENCY,
     )
 
+    # Cardholder identity for 3DS (3DS2 authenticates against it; recurring
+    # mandates 3DS). Best-effort — checkout still proceeds if the lookup fails.
+    email = first = last = None
+    try:
+        resp = get_supabase().auth.admin.get_user_by_id(user_id)
+        u = getattr(resp, "user", None) or resp
+        email = getattr(u, "email", None)
+        meta = getattr(u, "user_metadata", None) or {}
+        first, last = meta.get("first_name"), meta.get("last_name")
+    except Exception:
+        pass
+
     return_url = f"{s.app_url}/app/billing/return?ref={reference}"
     try:
         result = noon.initiate_order(
@@ -92,6 +105,9 @@ def checkout(body: CheckoutRequest, authorization: str = Header()):
             # Register a recurring subscription so Noon auto-charges each cycle.
             subscription_name=plans.subscription_name(plan),
             payment_frequency_days=plans.PERIOD_DAYS,
+            customer_email=email,
+            customer_first=first,
+            customer_last=last,
         )
     except (httpx.HTTPError, ValueError) as e:
         repo.mark_order(reference, "failed")

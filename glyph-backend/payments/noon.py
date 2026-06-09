@@ -48,6 +48,10 @@ def initiate_order(
     return_url: str,
     subscription_name: str | None = None,
     payment_frequency_days: int | None = None,
+    customer_email: str | None = None,
+    customer_first: str | None = None,
+    customer_last: str | None = None,
+    country: str = "SA",
 ) -> dict:
     """Create a Noon order and return {noon_order_id, post_url, raw}.
 
@@ -84,6 +88,19 @@ def initiate_order(
             "name": subscription_name,
             "amount": amount,
             "paymentFrequency": str(payment_frequency_days),
+        }
+
+    # Cardholder details for 3DS. 3DS2 needs an identity to authenticate against;
+    # omitting this is a cause of "3DS unable to authenticate". Field shape
+    # (billing.contact / billing.address.country) confirmed via sandbox.
+    if customer_email:
+        payload["billing"] = {
+            "contact": {
+                "firstName": customer_first or "",
+                "lastName": customer_last or "",
+                "email": customer_email,
+            },
+            "address": {"country": country},
         }
 
     with httpx.Client(timeout=30) as client:
