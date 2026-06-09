@@ -2,6 +2,7 @@ import { useNavigate, useSearchParams } from "react-router-dom"
 import { useAuth } from "../../contexts/AuthContext"
 import { useLanguage } from "../../contexts/LanguageContext"
 import { useState } from "react"
+import GoogleButton from "../components/GoogleButton"
 
 function Login() {
     const navigate = useNavigate()
@@ -51,6 +52,18 @@ function Login() {
                             {error}
                         </div>
                     )}
+
+                    <GoogleButton
+                        next={inviteToken ? `/invite/${inviteToken}` : '/app'}
+                        label={tl.continueWithGoogle}
+                        onError={setError}
+                    />
+
+                    <div className="flex items-center gap-3">
+                        <span className="h-px flex-1 bg-[var(--color-line)]" />
+                        <span className="text-xs text-[var(--color-fg-subtle)]">{tl.or}</span>
+                        <span className="h-px flex-1 bg-[var(--color-line)]" />
+                    </div>
 
                     <Field
                         label={tl.email}

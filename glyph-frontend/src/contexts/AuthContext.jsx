@@ -47,6 +47,19 @@ export function AuthProvider({ children }) {
         return data
     }
 
+    async function signInWithOAuth(provider, { next } = {}) {
+        const callback = `${window.location.origin}/auth/callback`
+        const redirectTo = next ? `${callback}?next=${encodeURIComponent(next)}` : callback
+        const { data, error } = await supabase.auth.signInWithOAuth({
+            provider,
+            options: { redirectTo },
+        })
+        if (error) throw error
+        // On the web, signInWithOAuth redirects the browser to the provider;
+        // execution past this point only happens if the redirect was blocked.
+        return data
+    }
+
     async function resendVerification(email, { next } = {}) {
         const callback = `${window.location.origin}/auth/callback`
         const emailRedirectTo = next ? `${callback}?next=${encodeURIComponent(next)}` : callback
@@ -64,7 +77,7 @@ export function AuthProvider({ children }) {
     }
 
     return (
-        <AuthContext.Provider value={{ user, session, loading, login, register, resendVerification, logout }}>
+        <AuthContext.Provider value={{ user, session, loading, login, register, signInWithOAuth, resendVerification, logout }}>
             {children}
         </AuthContext.Provider>
     )

@@ -3,9 +3,11 @@ import { useNavigate, useSearchParams } from "react-router-dom"
 import { useAuth } from "../../contexts/AuthContext"
 import { supabase } from "../../services/supabase"
 
-// Lands here when the user clicks the verification email or any
-// emailRedirectTo link. supabase-js auto-detects the access_token in
-// the URL hash on app init; once that completes, we forward the user.
+// Lands here when the user clicks the verification email, any
+// emailRedirectTo link, or returns from an OAuth provider (Google).
+// supabase-js auto-detects the access_token in the URL hash (email/implicit)
+// or exchanges the `?code=` (OAuth/PKCE) on app init; once that completes we
+// forward the user.
 function AuthCallback() {
     const navigate = useNavigate()
     const [searchParams] = useSearchParams()
@@ -30,16 +32,27 @@ function AuthCallback() {
             return
         }
 
-        // Give supabase-js a beat to process the hash, then re-check.
-        const t = setTimeout(async () => {
+        // Give supabase-js time to process the hash / exchange the OAuth code,
+        // re-checking a few times before giving up (the code exchange is a
+        // network round-trip and can outlast a single short timeout).
+        let cancelled = false
+        let attempts = 0
+        const iv = setInterval(async () => {
+            attempts += 1
             const { data: { session } } = await supabase.auth.getSession()
+            if (cancelled) return
             if (session) {
+                clearInterval(iv)
                 navigate(next, { replace: true })
-            } else {
-                setError("We couldn't verify this link. It may have expired or already been used.")
+            } else if (attempts >= 5) {
+                clearInterval(iv)
+                setError("We couldn't complete sign in. The link may have expired or already been used.")
             }
-        }, 1500)
-        return () => clearTimeout(t)
+        }, 800)
+        return () => {
+            cancelled = true
+            clearInterval(iv)
+        }
     }, [user, loading, navigate, next, searchParams])
 
     return (

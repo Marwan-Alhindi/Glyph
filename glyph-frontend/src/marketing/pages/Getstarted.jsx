@@ -3,6 +3,7 @@ import { useAuth } from "../../contexts/AuthContext"
 import { useLanguage } from "../../contexts/LanguageContext"
 import { useEffect, useState } from "react"
 import { apiFetch } from "../../services/supabase"
+import GoogleButton from "../components/GoogleButton"
 
 function Getstarted() {
     const navigate = useNavigate()
@@ -189,6 +190,18 @@ function Getstarted() {
                             {error}
                         </div>
                     )}
+
+                    <GoogleButton
+                        next={inviteToken ? `/invite/${inviteToken}` : '/app'}
+                        label={tg.continueWithGoogle}
+                        onError={setError}
+                    />
+
+                    <div className="flex items-center gap-3">
+                        <span className="h-px flex-1 bg-[var(--color-line)]" />
+                        <span className="text-xs text-[var(--color-fg-subtle)]">{tg.or}</span>
+                        <span className="h-px flex-1 bg-[var(--color-line)]" />
+                    </div>
 
                     <Field
                         label={tg.email}
