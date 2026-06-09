@@ -1,8 +1,16 @@
 """Usage tracking data access."""
 
+from datetime import datetime, timezone
+
 from supabase import Client
 
 from dependencies import get_supabase
+
+
+def _parse_ts(value: str) -> datetime:
+    """Parse a Postgres timestamptz string to an aware UTC datetime."""
+    dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
 class UsageRepository:
@@ -10,6 +18,9 @@ class UsageRepository:
         self._db = client or get_supabase()
 
     def get_plan(self, user_id: str) -> str:
+        """Effective plan. Payments are one-time monthly: a paid plan lapses to
+        free once its subscription period ends, so the user must pay again to
+        renew. This is the single source of truth read across the app."""
         result = (
             self._db.table("profiles")
             .select("plan")
@@ -17,7 +28,22 @@ class UsageRepository:
             .single()
             .execute()
         )
-        return (result.data or {}).get("plan") or "free"
+        plan = (result.data or {}).get("plan") or "free"
+        if plan == "free":
+            return "free"
+
+        sub = (
+            self._db.table("subscriptions")
+            .select("current_period_end")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+        rows = sub.data or []
+        period_end = rows[0].get("current_period_end") if rows else None
+        if not period_end or _parse_ts(period_end) < datetime.now(timezone.utc):
+            return "free"  # lapsed (or no active period) — back to free
+        return plan
 
     def get_tokens_used(self, user_id: str, period: str) -> int:
         result = (

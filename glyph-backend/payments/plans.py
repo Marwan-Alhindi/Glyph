@@ -10,6 +10,10 @@ from decimal import Decimal
 
 CURRENCY = "SAR"
 
+# Access granted per one-time payment. The plan lapses to free after this many
+# days (enforced in UsageRepository.get_plan); the user pays again to renew.
+PERIOD_DAYS = 30
+
 # Monthly price per paid plan. Adjust these freely.
 PLAN_PRICES: dict[str, Decimal] = {
     "pro": Decimal("49.00"),
@@ -32,6 +36,6 @@ def price_str(plan: str) -> str:
 
 
 def next_period_end(start: datetime | None = None) -> datetime:
-    """One monthly billing period from `start` (default: now, UTC)."""
+    """End of the access period from `start` (default: now, UTC)."""
     base = start or datetime.now(timezone.utc)
-    return base + timedelta(days=30)
+    return base + timedelta(days=PERIOD_DAYS)

@@ -18,6 +18,7 @@ import httpx
 from fastapi import APIRouter, Header, HTTPException, Request
 
 from auth import get_current_user
+from dependencies import get_supabase
 from database.subscriptions import SubscriptionRepository
 from payments import noon, plans
 from settings import get_settings
@@ -26,16 +27,16 @@ from api.schemas import CheckoutRequest
 router = APIRouter(prefix="/payments")
 
 
-def _apply_paid_order(reference: str) -> str:
-    """Re-fetch the order from Noon and, if paid, activate the subscription.
-    Returns the resulting order status. Idempotent."""
+def _apply_paid_order(reference: str) -> dict:
+    """Re-fetch the order from Noon and, if paid, grant the plan for one month.
+    Returns {status, detail}. Idempotent."""
     repo = SubscriptionRepository()
     order = repo.get_order(reference)
     if not order:
         raise HTTPException(status_code=404, detail="Unknown order")
 
     if order["status"] == "paid":
-        return "paid"  # already applied — nothing to do
+        return {"status": "paid", "detail": None}  # already applied
 
     noon_order_id = order.get("noon_order_id")
     if not noon_order_id:
@@ -44,16 +45,19 @@ def _apply_paid_order(reference: str) -> str:
     remote = noon.get_order(noon_order_id)
     if remote["status"] != "SUCCESS":
         repo.mark_order(reference, "failed")
-        return "failed"
+        return {"status": "failed", "detail": remote.get("error_message")}
 
+    # One-time monthly: grant the plan for one period. It lapses to free at
+    # current_period_end (enforced in UsageRepository.get_plan) until the user
+    # pays again.
     repo.activate(
         user_id=order["user_id"],
         plan=order["plan"],
         period_end=plans.next_period_end(),
-        card_token=remote.get("card_token"),
+        card_token=None,
     )
     repo.mark_order(reference, "paid")
-    return "paid"
+    return {"status": "paid", "detail": None}
 
 
 @router.post("/checkout")
@@ -80,14 +84,28 @@ def checkout(body: CheckoutRequest, authorization: str = Header()):
         currency=plans.CURRENCY,
     )
 
+    # Cardholder identity for 3DS (best-effort — checkout proceeds if it fails).
+    email = first = last = None
+    try:
+        resp = get_supabase().auth.admin.get_user_by_id(user_id)
+        u = getattr(resp, "user", None) or resp
+        email = getattr(u, "email", None)
+        meta = getattr(u, "user_metadata", None) or {}
+        first, last = meta.get("first_name"), meta.get("last_name")
+    except Exception:
+        pass
+
     return_url = f"{s.app_url}/app/billing/return?ref={reference}"
     try:
         result = noon.initiate_order(
             reference=reference,
             amount=amount,
             currency=plans.CURRENCY,
-            name=f"{plans.PLAN_NAMES[plan]} subscription",
+            name=f"{plans.PLAN_NAMES[plan]} ({plans.PERIOD_DAYS}-day access)",
             return_url=return_url,
+            customer_email=email,
+            customer_first=first,
+            customer_last=last,
         )
     except (httpx.HTTPError, ValueError) as e:
         repo.mark_order(reference, "failed")
@@ -106,8 +124,14 @@ def verify(reference: str, authorization: str = Header()):
     if not order or order["user_id"] != user_id:
         raise HTTPException(status_code=404, detail="Unknown order")
 
-    status = _apply_paid_order(reference)
-    return {"status": status, "plan": order["plan"]}
+    result = _apply_paid_order(reference)
+    sub = repo.get_subscription(order["user_id"]) or {}
+    return {
+        "status": result["status"],
+        "plan": order["plan"],
+        "detail": result.get("detail"),
+        "access_until": sub.get("current_period_end"),
+    }
 
 
 @router.post("/webhook")
