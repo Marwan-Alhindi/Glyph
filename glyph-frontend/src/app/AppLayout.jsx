@@ -813,9 +813,21 @@ function PaymentNoticeModal({ notice, onClose }) {
 function BillingModal({ currentPlan, onClose }) {
     const [pendingPlan, setPendingPlan] = useState(null)
     const [error, setError] = useState("")
+    const [periodEnd, setPeriodEnd] = useState(null)
+
+    // One-time monthly: while a paid plan is active you keep it until it lapses,
+    // so plan switching is locked until renewal. Only a free (lapsed) user buys.
+    const onPaidPlan = currentPlan !== 'free'
+    const untilDate = periodEnd ? new Date(periodEnd).toLocaleDateString() : null
+
+    useEffect(() => {
+        apiFetch('/payments/subscription')
+            .then(sub => setPeriodEnd(sub?.current_period_end || null))
+            .catch(() => {})
+    }, [])
 
     async function handleUpgrade(planId) {
-        if (planId === currentPlan || planId === 'free' || pendingPlan) return
+        if (planId === currentPlan || planId === 'free' || onPaidPlan || pendingPlan) return
         setError("")
         setPendingPlan(planId)
         try {
@@ -843,6 +855,7 @@ function BillingModal({ currentPlan, onClose }) {
                         <p className="text-base font-semibold text-[var(--color-fg)]">Plan & Billing</p>
                         <p className="text-xs text-[var(--color-fg-muted)] mt-0.5">
                             You're on the <span className="capitalize font-medium text-[var(--color-fg)]">{currentPlan}</span> plan
+                            {onPaidPlan && untilDate && <> · active until {untilDate}</>}
                         </p>
                     </div>
                     <button
@@ -857,7 +870,10 @@ function BillingModal({ currentPlan, onClose }) {
                 <div className="grid grid-cols-3 gap-4 p-6">
                     {PLANS.map(plan => {
                         const isCurrent = plan.id === currentPlan
-                        const isDowngrade = PLANS.findIndex(p => p.id === plan.id) < PLANS.findIndex(p => p.id === currentPlan)
+                        // Buy a paid plan only when you're on free (lapsed). While a
+                        // paid plan is active, switching waits until renewal.
+                        const purchasable = !isCurrent && plan.id !== 'free' && !onPaidPlan
+                        const lockedUntilRenewal = !isCurrent && onPaidPlan
                         return (
                             <div
                                 key={plan.id}
@@ -894,23 +910,22 @@ function BillingModal({ currentPlan, onClose }) {
                                     ))}
                                 </ul>
                                 <button
-                                    onClick={() => handleUpgrade(plan.id)}
-                                    disabled={isCurrent || !!pendingPlan}
+                                    onClick={() => purchasable && handleUpgrade(plan.id)}
+                                    disabled={!purchasable || !!pendingPlan}
+                                    title={lockedUntilRenewal ? `Choose this when your plan renews${untilDate ? ` on ${untilDate}` : ''}` : undefined}
                                     className={`mt-4 w-full rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
-                                        isCurrent
-                                            ? 'cursor-default bg-[var(--color-surface-3)] text-[var(--color-fg-subtle)]'
-                                            : isDowngrade
-                                            ? 'border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:border-[var(--color-fg-subtle)] hover:text-[var(--color-fg)]'
-                                            : 'bg-white text-black hover:bg-[var(--color-brand)] disabled:opacity-60'
+                                        purchasable
+                                            ? 'bg-white text-black hover:bg-[var(--color-brand)] disabled:opacity-60'
+                                            : 'cursor-default bg-[var(--color-surface-3)] text-[var(--color-fg-subtle)]'
                                     }`}
                                 >
                                     {isCurrent
                                         ? 'Current plan'
+                                        : lockedUntilRenewal
+                                        ? 'At renewal'
                                         : pendingPlan === plan.id
                                         ? 'Redirecting…'
-                                        : isDowngrade
-                                        ? 'Downgrade'
-                                        : 'Upgrade'}
+                                        : `Choose ${plan.name}`}
                                 </button>
                             </div>
                         )

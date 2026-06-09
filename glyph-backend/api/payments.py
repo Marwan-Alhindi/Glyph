@@ -20,6 +20,7 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from auth import get_current_user
 from dependencies import get_supabase
 from database.subscriptions import SubscriptionRepository
+from database.usage import UsageRepository
 from payments import noon, plans
 from settings import get_settings
 from api.schemas import CheckoutRequest
@@ -67,6 +68,14 @@ def checkout(body: CheckoutRequest, authorization: str = Header()):
     plan = body.plan
     if not plans.is_purchasable(plan):
         raise HTTPException(status_code=400, detail=f"Plan '{plan}' is not purchasable")
+
+    # One-time monthly: no mid-cycle switching. If a paid plan is still active,
+    # the user keeps it until it lapses to free, then chooses again.
+    if UsageRepository().get_plan(user_id) != "free":
+        raise HTTPException(
+            status_code=409,
+            detail="You already have an active plan. You can choose a plan again when it renews.",
+        )
 
     s = get_settings()
     if not (s.noon_business_id and s.noon_application and s.noon_api_key):
