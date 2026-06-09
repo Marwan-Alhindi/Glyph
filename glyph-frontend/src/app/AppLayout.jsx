@@ -756,8 +756,8 @@ const PLANS = [
         name: 'Pro',
         // SAR is the charged amount — keep in sync with backend payments/plans.py
         // PLAN_PRICES. USD is approximate (SAR pegged at ~3.75/USD), display-only.
-        price: 'SAR 49',
-        priceUsd: '$13',
+        price: 'SAR 1',  // TEMP: production test price — revert to 'SAR 49'
+        priceUsd: '$0.30',
         period: '/month',
         tokens: '3M tokens / month',
         features: ['Unlimited chats', '3 teammates'],

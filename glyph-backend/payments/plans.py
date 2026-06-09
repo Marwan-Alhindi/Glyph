@@ -16,7 +16,7 @@ PERIOD_DAYS = 30
 
 # Monthly price per paid plan. Adjust these freely.
 PLAN_PRICES: dict[str, Decimal] = {
-    "pro": Decimal("49.00"),
+    "pro": Decimal("1.00"),  # TEMP: SAR 1 for production test — revert to 49.00
     "max": Decimal("199.00"),
 }
 
