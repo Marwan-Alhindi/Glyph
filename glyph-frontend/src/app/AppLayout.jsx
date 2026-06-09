@@ -11,6 +11,7 @@ function AppLayout() {
     const [landingInput, setLandingInput] = useState("")
     const [userMenuOpen, setUserMenuOpen] = useState(false)
     const [billingOpen, setBillingOpen] = useState(false)
+    const [paymentNotice, setPaymentNotice] = useState(null)
     const [leaveChatTarget, setLeaveChatTarget] = useState(null)
     const [leavePending, setLeavePending] = useState(false)
     const [renamingChatId, setRenamingChatId] = useState(null)
@@ -56,6 +57,20 @@ function AppLayout() {
         document.addEventListener('mousedown', onClick)
         return () => document.removeEventListener('mousedown', onClick)
     }, [])
+
+    // Confirm a pending Noon payment regardless of which /app page Noon's
+    // checkout redirected us back to. handleUpgrade stashes the order reference
+    // before redirecting; on the next load we verify it, show a result notice,
+    // and clear it so it only runs once.
+    useEffect(() => {
+        if (!user?.id) return
+        const ref = localStorage.getItem('glyph_pending_payment')
+        if (!ref) return
+        localStorage.removeItem('glyph_pending_payment')
+        apiFetch(`/payments/verify/${encodeURIComponent(ref)}`)
+            .then(({ status, plan }) => setPaymentNotice({ status, plan }))
+            .catch(() => setPaymentNotice({ status: 'error' }))
+    }, [user?.id])
 
     function sortChats(list) {
         return [...list].sort((a, b) => {
@@ -227,6 +242,19 @@ function AppLayout() {
                 <BillingModal
                     currentPlan={usage?.plan || 'free'}
                     onClose={() => setBillingOpen(false)}
+                />
+            )}
+
+            {/* Payment result notice (after returning from Noon checkout) */}
+            {paymentNotice && (
+                <PaymentNoticeModal
+                    notice={paymentNotice}
+                    onClose={() => {
+                        const wasPaid = paymentNotice.status === 'paid'
+                        setPaymentNotice(null)
+                        // Reload so the plan badge / limits reflect the upgrade immediately.
+                        if (wasPaid) window.location.reload()
+                    }}
                 />
             )}
 
@@ -725,7 +753,10 @@ const PLANS = [
     {
         id: 'pro',
         name: 'Pro',
-        price: '$12',
+        // SAR is the charged amount — keep in sync with backend payments/plans.py
+        // PLAN_PRICES. USD is approximate (SAR pegged at ~3.75/USD), display-only.
+        price: 'SAR 49',
+        priceUsd: '$13',
         period: '/month',
         tokens: '3M tokens / month',
         features: ['Unlimited chats', '3 teammates'],
@@ -733,18 +764,68 @@ const PLANS = [
     {
         id: 'max',
         name: 'Max',
-        price: '$35',
+        price: 'SAR 199',
+        priceUsd: '$53',
         period: '/month',
         tokens: '15M tokens / month',
         features: ['Unlimited teammates'],
     },
 ]
 
+function PaymentNoticeModal({ notice, onClose }) {
+    const paid = notice.status === 'paid'
+    const title = paid
+        ? `You're on ${notice.plan} 🎉`
+        : notice.status === 'error'
+        ? "We couldn't confirm your payment"
+        : 'Payment not completed'
+    const body = paid
+        ? 'Your subscription is active and your new limits are live.'
+        : notice.status === 'error'
+        ? 'If you were charged, it will be applied automatically shortly. Otherwise you can try again.'
+        : "The payment didn't go through — you weren't charged."
+
+    return (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <div className="w-full max-w-sm rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-1)] p-6 text-center shadow-2xl">
+                <div className={`mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full ${paid ? 'bg-emerald-400/15 text-emerald-400' : 'bg-rose-500/15 text-rose-400'}`}>
+                    {paid ? '✓' : '!'}
+                </div>
+                <p className="text-base font-semibold text-[var(--color-fg)]">{title}</p>
+                <p className="mt-1.5 text-sm text-[var(--color-fg-muted)]">{body}</p>
+                <button
+                    onClick={onClose}
+                    className="mt-5 w-full rounded-lg bg-white px-4 py-2 text-sm font-medium text-black hover:bg-[var(--color-brand)]"
+                >
+                    {paid ? 'Continue' : 'Close'}
+                </button>
+            </div>
+        </div>
+    )
+}
+
 function BillingModal({ currentPlan, onClose }) {
-    function handleUpgrade(planId) {
-        if (planId === currentPlan) return
-        // TODO: replace with Noon Payment checkout redirect
-        window.location.href = `mailto:hello@glypho.live?subject=Upgrade to ${planId} plan`
+    const [pendingPlan, setPendingPlan] = useState(null)
+    const [error, setError] = useState("")
+
+    async function handleUpgrade(planId) {
+        if (planId === currentPlan || planId === 'free' || pendingPlan) return
+        setError("")
+        setPendingPlan(planId)
+        try {
+            // Start a Noon Hosted Checkout and hand the browser to Noon's page.
+            const { reference, checkout_url } = await apiFetch('/payments/checkout', {
+                method: 'POST',
+                body: { plan: planId },
+            })
+            // Stash the reference so AppLayout self-verifies on return no matter
+            // which /app page Noon redirects us back to.
+            localStorage.setItem('glyph_pending_payment', reference)
+            window.location.href = checkout_url
+        } catch (err) {
+            setError(err.detail || err.message || "Could not start checkout.")
+            setPendingPlan(null)
+        }
     }
 
     return (
@@ -792,6 +873,11 @@ function BillingModal({ currentPlan, onClose }) {
                                     <span className="text-2xl font-semibold text-[var(--color-fg)]">{plan.price}</span>
                                     <span className="text-xs text-[var(--color-fg-subtle)]">{plan.period}</span>
                                 </div>
+                                {plan.priceUsd && (
+                                    <p className="mt-0.5 text-[11px] text-[var(--color-fg-subtle)]">
+                                        ≈ {plan.priceUsd}{plan.period}
+                                    </p>
+                                )}
                                 <p className="mt-2 text-xs font-medium text-emerald-400">{plan.tokens}</p>
                                 <ul className="mt-3 flex-1 space-y-1.5">
                                     {plan.features.map((f, i) => (
@@ -803,28 +889,37 @@ function BillingModal({ currentPlan, onClose }) {
                                 </ul>
                                 <button
                                     onClick={() => handleUpgrade(plan.id)}
-                                    disabled={isCurrent}
+                                    disabled={isCurrent || !!pendingPlan}
                                     className={`mt-4 w-full rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
                                         isCurrent
                                             ? 'cursor-default bg-[var(--color-surface-3)] text-[var(--color-fg-subtle)]'
                                             : isDowngrade
                                             ? 'border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:border-[var(--color-fg-subtle)] hover:text-[var(--color-fg)]'
-                                            : 'bg-white text-black hover:bg-[var(--color-brand)]'
+                                            : 'bg-white text-black hover:bg-[var(--color-brand)] disabled:opacity-60'
                                     }`}
                                 >
-                                    {isCurrent ? 'Current plan' : isDowngrade ? 'Downgrade' : 'Upgrade'}
+                                    {isCurrent
+                                        ? 'Current plan'
+                                        : pendingPlan === plan.id
+                                        ? 'Redirecting…'
+                                        : isDowngrade
+                                        ? 'Downgrade'
+                                        : 'Upgrade'}
                                 </button>
                             </div>
                         )
                     })}
                 </div>
 
-                <p className="border-t border-[var(--color-line-soft)] px-6 py-3 text-center text-xs text-[var(--color-fg-subtle)]">
-                    Payment integration coming soon. To upgrade now, email{' '}
-                    <a href="mailto:hello@glypho.live" className="text-[var(--color-fg-muted)] underline underline-offset-2">
-                        hello@glypho.live
-                    </a>
-                </p>
+                {error ? (
+                    <p className="border-t border-[var(--color-line-soft)] px-6 py-3 text-center text-xs text-red-400">
+                        {error}
+                    </p>
+                ) : (
+                    <p className="border-t border-[var(--color-line-soft)] px-6 py-3 text-center text-xs text-[var(--color-fg-subtle)]">
+                        Secure checkout by noon payments. You can cancel anytime.
+                    </p>
+                )}
             </div>
         </div>
     )
